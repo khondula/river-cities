@@ -35,6 +35,7 @@ get_usgs_sites <- function(my_city_sf){
   # use error handling to return null if no sites returned
   city_sites <- tryCatch({
     dataRetrieval::whatNWISsites(parameterCd = "00060", 
+                                 # drainAreaMin = # in square miles
                                              bBox = mybbox)},
     error = function(e) {return(NULL)})
   if(!is.null(city_sites)){
@@ -62,12 +63,13 @@ get_usgs_sites <- function(my_city_sf){
     dplyr::select(agency_cd, site_no, station_nm, dec_lat_va, dec_long_va,
                   huc_cd, data_type_cd, parm_cd, stat_cd, begin_date, end_date,
                   count_nu, early_enough) %>%
+    mutate(site_no = as.character(site_no)) %>%
     left_join(city_sites_info) %>%
     mutate(city = my_city_name, city_pop = my_city_pop) %>%
     arrange(site_no)
   
   # save as csv
-  readr::write_csv(df, path = glue("data/{my_city_name}.csv"))
+  if(nrow(df) > 0 ) {readr::write_csv(df, path = glue("data/{my_city_name}.csv"))}
   # return(df)
   }
 }
@@ -76,9 +78,9 @@ get_usgs_sites <- function(my_city_sf){
 # get_usgs_sites(us_cities_sf[3,])
 
 # run function over all sites
-purrr::walk(1:nrow(us_cities_sf), ~get_usgs_sites(us_cities_sf[.x,]))
+purrr::walk(615:nrow(us_cities_sf), ~get_usgs_sites(us_cities_sf[.x,]))
 
 # read in all csvs and save as one table
 fs::dir_ls("data") %>% 
-  purrr::map_df(~read_csv(.x)) %>% 
+  purrr::map_df(~read_csv(.x, col_types = c("cccddccccDDdlcdcd"))) %>% 
   readr::write_csv("river-cities.csv")
