@@ -3,14 +3,19 @@ library(maps)
 library(dataRetrieval)
 library(glue)
 library(readr)
+library(purrr)
+library(fs)
+# library(leaflet)
 
 # The maps package has a dataset called `us.cities` that had 1005 US cities with 
 # population of greater than approx 40,000 and state capitals regardless of size
 
+# make cities table into a spatial object
 us_cities_sf <- us.cities %>%
   st_as_sf(coords = c("long", "lat"), crs = 4326)
 
-my_city_sf <- us_cities_sf[11, ]
+# my_city_sf input is one row from us_cities_sf point data
+# lat, long, name, population
 
 #######################################
 get_usgs_sites <- function(my_city_sf){
@@ -18,7 +23,7 @@ get_usgs_sites <- function(my_city_sf){
   my_city_name <- my_city_sf$name
   my_city_pop <- my_city_sf$pop
 
-  # make 5km bounding box around city coordinate
+  # get coords of 5km bounding box around city coordinate
   mybbox <- my_city_sf %>% 
     st_transform(crs = 2163) %>%
     st_buffer(dist = 5000) %>% 
@@ -27,13 +32,14 @@ get_usgs_sites <- function(my_city_sf){
     as.vector() %>% round(digits = 2)
   
   # look for usgs sites with discharge within bbox
+  # use error handling to return null if no sites returned
   city_sites <- tryCatch({
     dataRetrieval::whatNWISsites(parameterCd = "00060", 
                                              bBox = mybbox)},
     error = function(e) {return(NULL)})
   if(!is.null(city_sites)){
   
-  # map
+  # map for troubleshooting
   # city_sites %>%
   #   st_as_sf(coords = c("dec_long_va", "dec_lat_va"), crs = 4326) %>%
   #   leaflet() %>%
@@ -45,12 +51,13 @@ get_usgs_sites <- function(my_city_sf){
     dplyr::select(site_no, state_cd, drain_area_va)
   
   # get info about record length
-  site_data_1980 <- whatNWISdata(parameterCd = "00060", 
+  site_data_1980 <- whatNWISdata(parameterCd = "00060", # discharge
                                  siteNumber = city_sites[["site_no"]]) %>%
     arrange(begin_date) %>%
     mutate(early_enough = begin_date < "1980-01-01") %>%
     dplyr::filter(early_enough, count_nu > 10)
   
+  # make a table with site info of interest and add city name and pop
   df <- site_data_1980 %>%
     dplyr::select(agency_cd, site_no, station_nm, dec_lat_va, dec_long_va,
                   huc_cd, data_type_cd, parm_cd, stat_cd, begin_date, end_date,
@@ -59,6 +66,7 @@ get_usgs_sites <- function(my_city_sf){
     mutate(city = my_city_name, city_pop = my_city_pop) %>%
     arrange(site_no)
   
+  # save as csv
   readr::write_csv(df, path = glue("data/{my_city_name}.csv"))
   # return(df)
   }
@@ -67,4 +75,10 @@ get_usgs_sites <- function(my_city_sf){
 
 # get_usgs_sites(us_cities_sf[3,])
 
+# run function over all sites
 purrr::walk(1:nrow(us_cities_sf), ~get_usgs_sites(us_cities_sf[.x,]))
+
+# read in all csvs and save as one table
+fs::dir_ls("data") %>% 
+  purrr::map_df(~read_csv(.x)) %>% 
+  readr::write_csv("river-cities.csv")
