@@ -5,6 +5,7 @@ library(glue)
 library(readr)
 library(purrr)
 library(fs)
+library(dplyr)
 # library(leaflet)
 
 # The maps package has a dataset called `us.cities` that has 1005 US cities with 
