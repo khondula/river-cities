@@ -56,19 +56,21 @@ get_usgs_sites <- function(my_city_sf){
                                  siteNumber = city_sites[["site_no"]]) %>%
     arrange(begin_date) %>%
     mutate(early_enough = begin_date < "1980-01-01") %>%
-    dplyr::filter(early_enough, count_nu > 10)
+    mutate(late_enough = end_date > "2000-01-01") %>%
+    dplyr::filter(early_enough, late_enough, count_nu > 10)
   
   # make a table with site info of interest and add city name and pop
   df <- site_data_1980 %>%
     dplyr::select(agency_cd, site_no, station_nm, dec_lat_va, dec_long_va,
                   huc_cd, data_type_cd, parm_cd, stat_cd, begin_date, end_date,
-                  count_nu, early_enough) %>%
+                  count_nu, early_enough, late_enough) %>%
     mutate(site_no = as.character(site_no)) %>%
     left_join(city_sites_info) %>%
     mutate(city = my_city_name, city_pop = my_city_pop) %>%
     arrange(site_no)
   
   # save as csv
+  if(!fs::dir_exists("data")){fs::dir_create("data")}
   if(nrow(df) > 0 ) {readr::write_csv(df, path = glue("data/{my_city_name}.csv"))}
   # return(df)
   }
@@ -81,11 +83,9 @@ get_usgs_sites <- function(my_city_sf){
 purrr::walk(1:nrow(us_cities_sf), ~get_usgs_sites(us_cities_sf[.x,]))
 
 # read in all csvs and save as one table
-fs::dir_ls("data") %>% 
-  purrr::map_df(~read_csv(.x, col_types = c("cccddccccDDdlcdcd"))) %>% 
-  readr::write_csv("river-cities.csv")
-
 df <- fs::dir_ls("data") %>% 
-  purrr::map_df(~read_csv(.x, col_types = c("cccddccccDDdlcdcd")))
+  purrr::map_df(~read_csv(.x, col_types = c("cccddccccDDdllcdcd")))
 
-# DT::datatable(df) # make interactive table
+df %>% readr::write_csv("river-cities.csv")
+
+DT::datatable(df,  options = list(searchHighlight = TRUE), filter = 'top') # make interactive table
