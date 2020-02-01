@@ -83,6 +83,9 @@ get_usgs_sites <- function(my_city_sf){
 # run function over all sites
 purrr::walk(1:nrow(us_cities_sf), ~get_usgs_sites(us_cities_sf[.x,]))
 
+# how many cities?
+list.files("data") %>% length()
+
 # read in all csvs and save as one table
 df <- fs::dir_ls("data") %>% 
   purrr::map_df(~read_csv(.x, col_types = c("cccddccccDDdllcdcd")))
