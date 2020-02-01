@@ -78,9 +78,14 @@ get_usgs_sites <- function(my_city_sf){
 # get_usgs_sites(us_cities_sf[3,])
 
 # run function over all sites
-purrr::walk(615:nrow(us_cities_sf), ~get_usgs_sites(us_cities_sf[.x,]))
+purrr::walk(1:nrow(us_cities_sf), ~get_usgs_sites(us_cities_sf[.x,]))
 
 # read in all csvs and save as one table
 fs::dir_ls("data") %>% 
   purrr::map_df(~read_csv(.x, col_types = c("cccddccccDDdlcdcd"))) %>% 
   readr::write_csv("river-cities.csv")
+
+df <- fs::dir_ls("data") %>% 
+  purrr::map_df(~read_csv(.x, col_types = c("cccddccccDDdlcdcd")))
+
+# DT::datatable(df) # make interactive table
