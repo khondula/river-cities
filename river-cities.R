@@ -29,7 +29,7 @@ get_usgs_sites <- function(my_city_sf){
     st_transform(crs = 2163) %>%
     st_buffer(dist = 5000) %>% 
     st_transform(crs = 4326) %>%
-    st_bbox(my_city_sf) %>% 
+    st_bbox() %>% 
     as.vector() %>% round(digits = 2)
   
   # look for usgs sites with discharge within bbox
