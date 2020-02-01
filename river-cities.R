@@ -7,7 +7,7 @@ library(purrr)
 library(fs)
 # library(leaflet)
 
-# The maps package has a dataset called `us.cities` that had 1005 US cities with 
+# The maps package has a dataset called `us.cities` that has 1005 US cities with 
 # population of greater than approx 40,000 and state capitals regardless of size
 
 # make cities table into a spatial object
