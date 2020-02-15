@@ -13,7 +13,8 @@ library(dplyr)
 # 170 = Consolidated city
 # 172 = Consolidated city -- place within consolidated city
 
-citytown_long <- readr::read_csv("Subcounty_Intercensal_Pop_2000-2018.csv")
+# citytown_long <- readr::read_csv("Subcounty_Intercensal_Pop_2000-2018.csv")
+citytown_long <- vroom::vroom("/nfs/public-data/Census/Census_FineScalePop_2000-2018.csv")
 
 get_subcounty_data <- function(){
   
@@ -24,11 +25,11 @@ get_subcounty_data <- function(){
     miniUI::gadgetTitleBar(title = "Get data from"),
     miniUI::miniContentPanel(
     shiny::fillCol(flex = c(1, 4),
-      fillRow(
+      fillRow(flex = c(1, 3),
       shiny::selectizeInput(inputId = "my_state",
                         label = "State:",
                         choices = states,
-                        multiple = TRUE),
+                        multiple = TRUE, width = "800px"),
     shiny::uiOutput('selectorUI_placenames')),
     shiny::plotOutput('myplot')
   )))
@@ -61,9 +62,9 @@ server <- function(input, output, session){
    req(return_data())
    
    return_data() %>%
-     ggplot(aes(x = year, y = population, group = STATE)) +
-     geom_point() + 
-     geom_line() +
+     ggplot(aes(x = year, y = population, group = SUMLEV)) +
+     geom_point(aes(col = SUMLEV)) + 
+     geom_line(aes(col = SUMLEV)) +
      expand_limits(y = 0) +
      facet_wrap(vars(NAME), scales = "free_y")
    
