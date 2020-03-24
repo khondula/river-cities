@@ -10,6 +10,7 @@ library(sf)
 data_dir <- "/nfs/khondula-data/projects/river-cities/data"
 claims_tracts11 <- read_csv(glue::glue("{data_dir}/NFIP/claims_tracts11.csv"))
 my_tract <- claims_tracts11[["tract"]][40]
+my_tract <- claims_tracts_togo[1]
 my_tract
 
 
@@ -23,6 +24,10 @@ find_tractname_matches <- function(my_tract, agrep_dist = 0.35){
   tract_places <- read_csv(glue("{places_lookup_dir}/tract_{my_tract}.csv"),
                            col_types = cols(.default = col_character()))
 
+  if(nrow(tract_places) == 0){
+    filepath2 <- glue::glue("{data_dir}/census-lookups/tracts-noPlaces.csv")
+    data.frame(tract = my_tract) %>% readr::write_csv(filepath2, append = TRUE)
+  }
   if(nrow(tract_places) > 0){ # if there are places tract overlaps
     
   claims_df_tract <- vroom(claims_data_file, 
@@ -55,14 +60,17 @@ find_tractname_matches(my_tract)
 claims_tracts11[["tract"]][1:10] %>% 
   purrr::walk(~find_tractname_matches(.x, agrep_dist = 0.35))
 
+claims_tracts_togo[] %>% 
+  purrr::walk(~find_tractname_matches(.x, agrep_dist = 0.35))
+
 names_matching_dir <- glue::glue("{data_dir}/census-lookups/names-matching")
 fs::dir_ls(names_matching_dir) %>% length()
   
-fs::dir_ls(names_matching_dir) %>% 
+list.files(names_matching_dir, full.names = TRUE) %>% 
   map_df(~read_csv(.x, col_types = c("ccccc"))) %>% View()
 
 library(rslurm)
-pars <- data.frame(my_tract = claims_tracts11[["tract"]],
+pars <- data.frame(my_tract = claims_tracts_togo,
                    agrep_dist = 0.35,
                    stringsAsFactors = FALSE)
 
@@ -74,9 +82,46 @@ sjob <- slurm_apply(find_tractname_matches,
                     cpus_per_node = 4,
                     submit = TRUE)
 
-fs::dir_ls(names_matching_dir) %>% length()
+claims_tracts <- claims_tracts11[["tract"]]
+lookup_files <- list.files(names_matching_dir, full.names = FALSE)
+length(lookup_files)
+completed_tracts <- purrr::map_chr(lookup_files, ~substr(.x, 7, 17))
+completed_tracts_blank <- readr::read_csv(filepath2, col_types = "c") %>%
+  dplyr::pull(tract)
+completed_tracts <- union(completed_tracts, completed_tracts_blank)
+length(completed_tracts)
+claims_tracts_togo <- claims_tracts[!claims_tracts %in% completed_tracts]
+length(claims_tracts_togo)
+
+# combine into one csv file
+lookup_files <- list.files(names_matching_dir, full.names = TRUE)
+lookup_file <- lookup_files[1]
+
+save_combined <- function(lookup_file){
+  data_dir <- "/nfs/khondula-data/projects/river-cities/data"
+  filepath3 <- glue::glue("{data_dir}/census-lookups/tracts-places-lookup.csv")
+  lookup_file %>% 
+    readr::read_csv(col_types = "ccccc") %>%
+    readr::write_csv(filepath3, append = TRUE)
+}
+
+# purrr::walk(lookup_files[], ~save_combined(.x))
+pars <- data.frame(lookup_file = lookup_files[301:50281],
+                   stringsAsFactors = FALSE)
+
+sjob <- slurm_apply(save_combined, 
+                    pars, 
+                    jobname = 'combine',
+                    # slurm_options = list(partition = "sesync"),
+                    nodes = 20, 
+                    cpus_per_node = 4,
+                    submit = TRUE)
+
+names_lookups_df <- vroom::vroom(filepath3, col_types = c("ccccc"))
+head(names_lookups_df)
 
 # map
+
 leaflet_tract_map <- function(my_tract){
   state_fips <- substr(my_tract, 1, 2)
   # read in tracts spatial data and filter to tract
