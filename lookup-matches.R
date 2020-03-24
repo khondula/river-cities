@@ -1,60 +1,80 @@
 library(dplyr)
-library(data.table)
 library(glue)
+library(purrr)
 library(readr)
+library(tibble)
 library(vroom)
 library(leaflet)
 library(sf)
 
 data_dir <- "/nfs/khondula-data/projects/river-cities/data"
-places_lookup_dir <- glue("{data_dir}/census-lookups/tract-x-places")
-urban_lookup_dir <- glue("{data_dir}/census-lookups/tract-x-urban")
-
 claims_tracts11 <- read_csv(glue::glue("{data_dir}/NFIP/claims_tracts11.csv"))
-claims_data_file <- glue("{data_dir}/NFIP/openFEMA_claims20190831.csv")
-
-head(claims_tracts11)
-
-my_tract <- claims_tracts11[["tract"]][500]
+my_tract <- claims_tracts11[["tract"]][40]
 my_tract
 
-tract_places <- read_csv(glue("{places_lookup_dir}/tract_{my_tract}.csv"),
-                         col_types = cols(.default = col_character()))
-# tract_urbans <- read_csv(glue("{urban_lookup_dir}/tract_{my_tract}.csv"))
 
-claims_df_tract <- read_csv(claims_data_file, 
-                            col_types = cols(.default = col_character())) %>%
-  dplyr::filter(censustract == my_tract)
+find_tractname_matches <- function(my_tract, agrep_dist = 0.35){
+  
+  data_dir <- "/nfs/khondula-data/projects/river-cities/data"
+  claims_data_file <- glue("{data_dir}/NFIP/openFEMA_claims20190831.csv")
+  
+  places_lookup_dir <- glue("{data_dir}/census-lookups/tract-x-places")
+  
+  tract_places <- read_csv(glue("{places_lookup_dir}/tract_{my_tract}.csv"),
+                           col_types = cols(.default = col_character()))
 
+  if(nrow(tract_places) > 0){ # if there are places tract overlaps
+    
+  claims_df_tract <- vroom(claims_data_file, 
+                              col_types = cols(.default = col_character())) %>%
+    dplyr::filter(censustract == my_tract)
+  
+  place_name <- tract_places$NAME
+  claims_names <- claims_df_tract$reportedcity %>% unique()
 
-nrow_tract_places <- nrow(tract_places)
-place_name <- tract_places$NAME
-place_GEOID <- tract_places$GEOID
-claims_names <- claims_df_tract$reportedcity %>% unique()
+  # Create table of matches!! 
+  place_name_matches <- purrr::set_names(place_name) %>%
+    purrr::map(~agrep(.x, claims_names, ignore.case = TRUE,
+                      value = TRUE, max.distance = agrep_dist)) %>%
+    purrr::map_df(~as_tibble(.x), .id = "place_name") %>%
+    left_join(dplyr::select(tract_places, GEOID, NAME), 
+              by = c("place_name" = "NAME"))
+  
+  claims_df_tract_matches <- claims_df_tract %>%
+    dplyr::select(censustract, reportedcity, countycode) %>%
+    distinct() %>% 
+    left_join(place_name_matches, by = c("reportedcity" = "value"))
+  
+  filepath1 <- glue::glue("{data_dir}/census-lookups/names-matching/tract_{my_tract}.csv")
+  claims_df_tract_matches %>% readr::write_csv(filepath1)
+  }
+}
 
-message(nrow(claims_df_tract), " claims for census track ", my_tract)
-message(nrow_tract_places, " place matches")
-writeLines(place_name)
-message(length(claims_names), " reported city names in claims")
-writeLines(claims_names)
+find_tractname_matches(my_tract)
 
-# Multiple place names and multiple reported cities
+claims_tracts11[["tract"]][1:10] %>% 
+  purrr::walk(~find_tractname_matches(.x, agrep_dist = 0.35))
 
-place_name_matches <- purrr::set_names(place_name) %>%
-  purrr::map(~agrep(.x, claims_names,
-                    ignore.case = TRUE,
-                     value = TRUE,
-                     max.distance = 0.25)) %>%
-  purrr::map_df(~as_tibble(.x), .id = "place_name") %>%
-  left_join(dplyr::select(tract_places, GEOID, NAME), 
-            by = c("place_name" = "NAME"))
+names_matching_dir <- glue::glue("{data_dir}/census-lookups/names-matching")
+fs::dir_ls(names_matching_dir) %>% length()
+  
+fs::dir_ls(names_matching_dir) %>% 
+  map_df(~read_csv(.x, col_types = c("ccccc"))) %>% View()
 
-claims_df_tract_matches <- claims_df_tract %>%
-  dplyr::select(censustract, reportedcity, countycode) %>%
-  distinct() %>% 
-  left_join(place_name_matches, by = c("reportedcity" = "value"))
+library(rslurm)
+pars <- data.frame(my_tract = claims_tracts11[["tract"]],
+                   agrep_dist = 0.35,
+                   stringsAsFactors = FALSE)
 
-claims_df_tract_matches
+sjob <- slurm_apply(find_tractname_matches, 
+                    pars, 
+                    jobname = 'tractnames',
+                    # slurm_options = list(partition = "sesync"),
+                    nodes = 20, 
+                    cpus_per_node = 4,
+                    submit = TRUE)
+
+fs::dir_ls(names_matching_dir) %>% length()
 
 # map
 leaflet_tract_map <- function(my_tract){
