@@ -106,59 +106,18 @@ save_combined <- function(lookup_file){
 }
 
 # purrr::walk(lookup_files[], ~save_combined(.x))
-pars <- data.frame(lookup_file = lookup_files[301:50281],
+pars <- data.frame(lookup_file = lookup_files[2:50281],
                    stringsAsFactors = FALSE)
 
 sjob <- slurm_apply(save_combined, 
                     pars, 
                     jobname = 'combine',
                     # slurm_options = list(partition = "sesync"),
-                    nodes = 20, 
-                    cpus_per_node = 4,
+                    nodes = 1, 
+                    cpus_per_node = 1,
                     submit = TRUE)
 
 names_lookups_df <- vroom::vroom(filepath3, col_types = c("ccccc"))
+nrow(names_lookups_df)
 head(names_lookups_df)
 
-# map
-
-leaflet_tract_map <- function(my_tract){
-  state_fips <- substr(my_tract, 1, 2)
-  # read in tracts spatial data and filter to tract
-  tracts_dir <- "/nfs/public-data/census-tiger-2019/TRACT"
-  tract_file <- glue::glue("{tracts_dir}/tl_2019_{state_fips}_tract.shp")
-  tract_sf <- sf::st_read(tract_file) %>%
-    dplyr::filter(GEOID == my_tract)
-  
-  # read in urban areas spatial data for nation
-  # urban_dir <- "/nfs/public-data/census-tiger-2019/UAC/"
-  # urban_file <- glue::glue("{urban_dir}/tl_2019_us_uac10.shp")
-  # urban_sf <- sf::st_read(urban_file)
-  
-  # read in places spatial data for state
-  places_dir <- "/nfs/public-data/census-tiger-2019/PLACES"
-  place_file <- glue::glue("{places_dir}/tl_2019_{state_fips}_place.shp")
-  place_sf <- sf::st_read(place_file) %>%
-    dplyr::filter(GEOID %in% place_GEOID)
-  
-  tract_bbox <- tract_sf %>%st_bbox()
-  
-  mm <- tract_sf %>% 
-    leaflet() %>%
-    fitBounds(lng1 = tract_bbox[["xmin"]],
-              lng2 = tract_bbox[["xmax"]],
-              lat1 = tract_bbox[["ymin"]],
-              lat2 = tract_bbox[["ymax"]]) %>%
-    addTiles() %>%
-    # addPolygons(data = urban_sf, fillColor = "red", 
-    #             opacity = 0,
-    #             popup = ~UACE10, group = "uac") %>%
-    addPolygons(opacity = 1, group = "tract") %>%
-    addPolygons(data = place_sf, color = "purple", 
-                popup = ~NAME, group = "places") %>%
-    addLayersControl(overlayGroups = c("tract", "places"))
-  
-  return(mm)
-}
-
-leaflet_tract_map(my_tract)
