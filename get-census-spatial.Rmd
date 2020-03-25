@@ -21,3 +21,14 @@ wget -r -np zip ftp://ftp2.census.gov/geo/tiger/TIGER2019/CBSA/
 
 Census Tiger shapefiles for places and tracts are in separate files by state
 with pattern `tl_2019_01_tract.shp` or `tl_2019_01_place.shp`
+
+
+plot UAC shapefile
+
+```{r}
+uac10 <- st_read("/nfs/public-data/census-tiger-2019/UAC/UAC/tl_2019_us_uac10.shp")
+uac10 %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolygons()
+```

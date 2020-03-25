@@ -7,7 +7,7 @@ library(dplyr)
 # make leaflet map showing census tract overlaid with census places
 # reads files from public data directory
 
-my_tract <- "01001020100" # example tract
+my_tract <- "12131950501" # example tract
 
 leaflet_tract_map <- function(my_tract){
   
@@ -37,6 +37,10 @@ leaflet_tract_map <- function(my_tract){
   place_sf <- sf::st_read(place_file) %>%
     dplyr::filter(GEOID %in% place_GEOID)
   
+  cbsa_dir <- "/nfs/public-data/census-tiger-2019/CBSA"
+  cbsa_file <- glue("{cbsa_dir}/tl_2019_us_cbsa.shp")
+  cbsa_sf <- sf::st_read(cbsa_file)
+  
   tract_bbox <- tract_sf %>% st_bbox()
   
   mm <- tract_sf %>% 
@@ -46,13 +50,13 @@ leaflet_tract_map <- function(my_tract){
               lat1 = tract_bbox[["ymin"]],
               lat2 = tract_bbox[["ymax"]]) %>%
     addTiles() %>%
-    # addPolygons(data = urban_sf, fillColor = "red", 
-    #             opacity = 0,
-    #             popup = ~UACE10, group = "uac") %>%
+    addPolygons(data = cbsa_sf, color = "green",
+                opacity = 1, 
+                popup = ~NAMELSAD, group = "mets") %>%
     addPolygons(opacity = 1, group = "tract") %>%
     addPolygons(data = place_sf, color = "purple", 
                 popup = ~NAME, group = "places") %>%
-    addLayersControl(overlayGroups = c("tract", "places"))
+    addLayersControl(overlayGroups = c("tract", "places", "mets"))
   
   return(mm)
 }

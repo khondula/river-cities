@@ -8,49 +8,51 @@ library(leaflet)
 library(sf)
 
 data_dir <- "/nfs/khondula-data/projects/river-cities/data"
-claims_tracts11 <- read_csv(glue::glue("{data_dir}/NFIP/claims_tracts11.csv"))
-my_tract <- claims_tracts11[["tract"]][40]
-my_tract <- claims_tracts_togo[1]
+claims_tracts11 <- read_csv(glue("{data_dir}/NFIP/claims_tracts11.csv"))
+
+my_tract <- claims_tracts11[["tract"]][3]
+# my_tract <- claims_tracts_togo[1]
 my_tract
 
 
-find_tractname_matches <- function(my_tract, agrep_dist = 0.35){
+find_tractname_matches <- function(my_tract, agrep_dist = 100, 
+                                   census_scale = "cbsa"){
   
   data_dir <- "/nfs/khondula-data/projects/river-cities/data"
   claims_data_file <- glue("{data_dir}/NFIP/openFEMA_claims20190831.csv")
   
-  places_lookup_dir <- glue("{data_dir}/census-lookups/tract-x-places")
+  tract_matches_lookup_dir <- glue("{data_dir}/census-lookups/tract-x-{census_scale}")
   
-  tract_places <- read_csv(glue("{places_lookup_dir}/tract_{my_tract}.csv"),
+  tract_matches <- read_csv(glue("{tract_matches_lookup_dir}/tract_{my_tract}.csv"),
                            col_types = cols(.default = col_character()))
 
-  if(nrow(tract_places) == 0){
-    filepath2 <- glue::glue("{data_dir}/census-lookups/tracts-noPlaces.csv")
+  if(nrow(tract_matches) == 0){
+    filepath2 <- glue::glue("{data_dir}/census-lookups/tracts-noMatches-{census_scale}.csv")
     data.frame(tract = my_tract) %>% readr::write_csv(filepath2, append = TRUE)
   }
-  if(nrow(tract_places) > 0){ # if there are places tract overlaps
+  if(nrow(tract_matches) > 0){ # if there are polygons tract overlaps
     
   claims_df_tract <- vroom(claims_data_file, 
                               col_types = cols(.default = col_character())) %>%
     dplyr::filter(censustract == my_tract)
   
-  place_name <- tract_places$NAME
+  census_name <- tract_matches[["NAME"]]
   claims_names <- claims_df_tract$reportedcity %>% unique()
 
   # Create table of matches!! 
-  place_name_matches <- purrr::set_names(place_name) %>%
+  census_name_matches <- purrr::set_names(census_name) %>%
     purrr::map(~agrep(.x, claims_names, ignore.case = TRUE,
                       value = TRUE, max.distance = agrep_dist)) %>%
-    purrr::map_df(~as_tibble(.x), .id = "place_name") %>%
-    left_join(dplyr::select(tract_places, GEOID, NAME), 
-              by = c("place_name" = "NAME"))
+    purrr::map_df(~as_tibble(.x), .id = "census_name") %>%
+    left_join(dplyr::select(tract_matches, GEOID, NAME), 
+              by = c("census_name" = "NAME"))
   
   claims_df_tract_matches <- claims_df_tract %>%
     dplyr::select(censustract, reportedcity, countycode) %>%
     distinct() %>% 
-    left_join(place_name_matches, by = c("reportedcity" = "value"))
+    left_join(census_name_matches, by = c("reportedcity" = "value"))
   
-  filepath1 <- glue::glue("{data_dir}/census-lookups/names-matching/tract_{my_tract}.csv")
+  filepath1 <- glue::glue("{data_dir}/census-lookups/names-matching-{census_scale}/tract_{my_tract}.csv")
   claims_df_tract_matches %>% readr::write_csv(filepath1)
   }
 }
@@ -63,8 +65,8 @@ claims_tracts11[["tract"]][1:10] %>%
 claims_tracts_togo[] %>% 
   purrr::walk(~find_tractname_matches(.x, agrep_dist = 0.35))
 
-names_matching_dir <- glue::glue("{data_dir}/census-lookups/names-matching")
-fs::dir_ls(names_matching_dir) %>% length()
+names_matching_dir <- glue("{data_dir}/census-lookups/tract-x-{census_scale}")
+list.files(names_matching_dir, full.names = TRUE) %>% length()
   
 list.files(names_matching_dir, full.names = TRUE) %>% 
   map_df(~read_csv(.x, col_types = c("ccccc"))) %>% View()
