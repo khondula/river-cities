@@ -1,0 +1,65 @@
+---
+title: "mets"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# metropolitan and micropolitan areas
+
+Reference info
+
+* https://www.census.gov/topics/housing/housing-patterns/about/core-based-statistical-areas.html
+* GLOSSARY: https://www2.census.gov/programs-surveys/demo/about/housing-patterns/glossary2.pdf
+* https://www2.census.gov/programs-surveys/cps/methodology/Geographic%20Coding%20-%20Metro%20Areas%20(since%20August%202005).pdf
+* https://www.census.gov/data/tables/time-series/demo/popest/2010s-total-metro-and-micro-statistical-areas.html
+* 2010 to 2018
+
+```{r}
+# location to download data
+data_dir <- "/nfs/khondula-data/projects/river-cities/data/"
+
+cbsa_file <- "https://www2.census.gov/programs-surveys/popest/datasets/2010-2018/metro/totals/cbsa-est2018-alldata.csv"
+cbsa_file_local <- glue::glue("{data_dir}/Census/{basename(cbsa_file)}")
+# download.file(msa_file, destfile = msa_file_local)
+
+```
+
+ CBSA Core based statistical area code
+ MDIV Metropolitan division code
+ STCOU State and county code
+ NAME Name/title of area
+ LSAD Legal/staticial area description
+
+Dataset includes net migration, births, deaths, residuals, etc. (88 columns)
+
+```{r}
+# read in
+cbsa_df <- readr::read_csv(cbsa_file_local,
+                           col_types = cols(CBSA = "c",
+                                            MDIV = "c",
+                                            STCOU = "c")) %>%
+  dplyr::select(1:16) 
+
+# filter and convert from wide to long
+cbsa_long <- cbsa_df %>% 
+  # keep grouping levels
+  group_by(CBSA, MDIV, STCOU, NAME, LSAD) %>%
+  # convert columns to rows
+  tidyr::pivot_longer(cols = CENSUS2010POP:POPESTIMATE2018, 
+                      names_to = "estimate", values_to = "population") %>%
+  # separate year and estimate type into separate columns 
+  # extract years as a the numbers in the estimate column
+  mutate(year = stringr::str_extract(estimate, "\\d+")) %>%
+  mutate(year = as.numeric(year)) %>%
+  # extract letters
+  mutate(estimate_type = stringr::str_extract(estimate, "[A-Z]+")) %>%
+  dplyr::select(-estimate)
+```
+
+```{r}
+cbsa_long %>% write_csv(glue("{data_dir}/Census/cbsa_population_long.csv"))
+```
+

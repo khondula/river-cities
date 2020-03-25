@@ -33,6 +33,8 @@ For places, agrep_dist = 0.35, for CBSA, agrep_dist = 100
 
 ## Population data
 
+`get-census-pops.Rmd` - CBSA populations for metro and micro areas
+
 | SUMLEV | description | years |
 |--------|-------------|-------|
 | 040    | states | 2000-2010, 2010-2018 |
