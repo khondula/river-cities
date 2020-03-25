@@ -1,0 +1,146 @@
+---
+title: "Lookup tables"
+author: "Kelly Hondula"
+date: "3/19/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Census population data for 2000-2018 for census PLACES (incorporated places and census designated places)
+
+From `citytown_long` data frame
+
+```{r}
+citytown_places <- citytown_long %>%
+  dplyr::select(SUMLEV, STATE, COUNTY, PLACE, COUSUB, NAME, STNAME) %>%
+  distinct()
+citytown_places %>% nrow()
+```
+
+113,827 "places" plus other units
+
+```{r}
+citytown_places %>% View()
+```
+
+SUMLEV 61 is used for years 2000-2010 and SUMLEV 061 used for 2010-2018. 
+SUMLEV 71 is used for years 2000-2010 and SUMLEV 071 used for 2010-2018
+
+Left pad 61 and 71
+
+```{r}
+citytown_places_lp <- citytown_places %>%
+  mutate(SUMLEV_lp = stringr::str_pad(SUMLEV, 3, side = "left", pad = "0"))
+```
+
+Now recound how many distinct places
+
+```{r}
+citytown_places_lp <- citytown_places_lp %>% 
+  dplyr::select(-SUMLEV) %>%
+  distinct() 
+citytown_places_lp %>% nrow()
+```
+
+79,189 places and other units
+
+```{r}
+citytown_places_lp$SUMLEV_lp %>% table()
+```
+
+(061) 21,296 Minor Civil Divisions
+(071) 14,208 MCD place parts
+(157) 23,935 County place parts
+(162) 19,627 Incorporated Places
+(170) 8 Consolidated Cities
+(172) 115 places within consolitated cities
+
+Example: Annapolis city in Maryland
+
+* SUMLEV 157 and 162 have *same* population estimates for each year
+* SUMLEV 157 has county FIPS filled out in the data
+* 24-003-01600 (10 digit identifier)
+
+Make a new column for 10 digit place identifiers for SUMLEV 157
+
+
+```{r}
+sumlev157 <- citytown_places_lp %>%
+  dplyr::filter(SUMLEV_lp == "157")
+```
+
+```{r}
+nrow(sumlev157)
+```
+
+23,935 places
+
+```{r}
+sumlev157 <- sumlev157 %>%
+  mutate(id_10dig = glue::glue("{STATE}_{COUNTY}_{PLACE}")) %>%
+  mutate(citypart = stringr::str_detect(NAME, "(pt.)"))
+```
+
+Cities with `(pt.)` in the name span across more than 1 county.
+Have different county codes but same place. 
+
+```{r}
+sumlev157 %>%
+  dplyr::filter(citypart == TRUE) %>%
+  pull(NAME) %>% unique() %>% length()
+```
+
+1138 cities that span county boundaries
+
+Any cities that span across states? 
+Count the number of unique STNAMEs for each NAME
+
+```{r}
+sumlev157 %>%
+  dplyr::filter(citypart == TRUE) %>%
+  dplyr::select(PLACE, NAME, STNAME) %>%
+  group_by(PLACE, NAME) %>%
+  summarise(n_states = n_distinct(STNAME)) %>% 
+  filter(n_states > 1)
+```
+
+Filter out "balance of county" estimates that are Place code 99900
+
+```{r}
+sumlev157_nb <- sumlev157 %>%
+  filter(PLACE != "99990") 
+nrow(sumlev157_nb)
+```
+
+20,939 places that do not include ["balance of county" estimates]( https://www.census.gov/programs-surveys/popest/about/faq.html)
+
+> Incorporated places can cross both county and MCD boundaries. When this occurs, the place name is followed by the designation "pt" (which stands for part). The PEP produces estimates of the unincorporated "balance of county" area for counties that are not entirely composed of incorporated places. Another way to understand this is to think of the "balance of county" as the county population minus the county population resident within incorporated places.
+
+Add a column that is "state_place" for 7 digit ids 
+
+```{r}
+sumlev157_nb <- sumlev157_nb %>%
+  mutate(id_7dig = glue::glue("{STATE}_{PLACE}"))
+```
+
+```{r}
+sumlev157_nb %>% 
+  pull(id_7dig) %>%
+  unique() %>% length()
+```
+
+19,580 unique places
+
+For populations, will need to GROUP BY 7 digit ids
+to summarize population from different counties. 
+Make sure not to aggregate across multiple types
+of population estimates. 
+
+To compare with NFIP data though, need to figure out
+which Place each census tract is in (or closest to?)
+
+There must be a spatial layer of level 157 boundaries. 
+

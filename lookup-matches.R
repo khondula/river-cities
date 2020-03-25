@@ -119,5 +119,20 @@ sjob <- slurm_apply(save_combined,
 
 names_lookups_df <- vroom::vroom(filepath3, col_types = c("ccccc"))
 nrow(names_lookups_df)
-head(names_lookups_df)
+tail(names_lookups_df)
 
+# how many unique combos of tracts and reported city names
+names_lookups_df %>% 
+  dplyr::select(censustract, reportedcity) %>% 
+  distinct() %>% nrow()
+# how many census tracts
+names_lookups_df %>% pull(censustract) %>% unique() %>% length()
+# how many reported city unique spellings etc
+names_lookups_df %>% pull(reportedcity) %>% unique() %>% length()
+
+# how many unique names corresponds to in census places
+length(unique(names_lookups_df$GEOID))
+# 15,716 places (unique GEOIDs which are state fips + place fips)
+
+# names_lookups_df %>%
+#   readr::write_csv(path = "/nfs/public-data/NFIP/tracts-places-lookup.csv")

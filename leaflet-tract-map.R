@@ -24,6 +24,7 @@ leaflet_tract_map <- function(my_tract){
   # urban_sf <- sf::st_read(urban_file)
   
   data_dir <- "/nfs/khondula-data/projects/river-cities/data"
+  data_dir <- "/nfs/public-data/NFIP"
   places_lookup_dir <- glue("{data_dir}/census-lookups/tract-x-places")
   
   tract_places <- read_csv(glue("{places_lookup_dir}/tract_{my_tract}.csv"),

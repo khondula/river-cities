@@ -1,0 +1,321 @@
+---
+title: "Claims data places"
+author: "Kelly Hondula"
+date: "2/17/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+National Flood Insurance Program Claims data
+
+[Source](https://www.fema.gov/media-library/assets/documents/180374)
+
+```{r}
+library(fs)
+library(sf)
+library(glue)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(magrittr)
+library(leaflet)
+library(rslurm)
+library(dataRetrieval)
+```
+
+Download data
+
+```{r}
+claims_url <- 'https://www.fema.gov/media-library-data/1575491579309-2366ee38d902c1bc983370e132ee36cc/FIMA_NFIP_Redacted_Claims_Data_Set.zip'
+data_dir <- "/nfs/khondula-data/projects/river-cities/data/NFIP"
+claims_file_local <- glue::glue("{data_dir}/{basename(claims_url)}")
+```
+
+```{r, eval = FALSE}
+if(!fs::dir_exists(data_dir)){fs::dir_create(data_dir)}
+download.file(claims_url, destfile = claims_file_local)
+unzip(claims_file_local, exdir = data_dir)
+```
+
+```{r}
+claims_data_file <- fs::dir_ls(data_dir, regexp = "*.csv")
+claims_df <- vroom::vroom(claims_data_file)
+```
+
+Spatial columns in claims data
+
+* reported city
+* countyCode
+* censusTract
+* latitude (1 decimal)
+* longitude (1 decimal)
+* state
+* reportedZipCode
+
+> US Census Bureau defined census Tracts; statistical subdivisions of a county or equivalent entity that are updated prior to each decennial census. The NFIP relies on our geocoding service to assign census tract code. 11 digit code defining census tract
+
+```{r}
+is.na(claims_df$censustract) %>% table() # 59,300 missing (2.4%)
+is.na(claims_df$reportedcity) %>% table() # 4505 missing
+is.na(claims_df$state) %>% table() # 12 missing
+is.na(claims_df$reportedzipcode) %>% table() # 1131 missing
+
+length(unique(claims_df$censustract)) # 54,858 census tracts
+# 74,134 tracts total in US
+```
+
+Find unique places in data set
+
+```{r}
+claims_places_distinct <- claims_df %>%
+  dplyr::select(state, countycode, censustract, 
+                reportedcity, reportedzipcode) %>%
+  distinct()
+```
+
+184,247 unique places in the claims data using above columns
+
+```{r}
+names(claims_places_distinct)
+names(claims_places_distinct) %>% 
+  purrr::map_int(~length(unique(claims_places_distinct[[.x]])))
+claims_places_distinct %>% 
+  distinct() %>% nrow()
+```
+
+* 56 states
+* 2977 county codes
+* 54,858 census tracts (59,300 missing, 2.4%)
+* 57,279 reported cities
+* 29,381 reported zip codes
+* 24,097 latlon coordinates
+
+```{r}
+n_tracts <- claims_places_distinct %>%
+  dplyr::select(countycode, censustract) %>%
+  distinct() %>%
+  group_by(countycode) %>%
+  summarise(n_tracts = n()) %>%
+  arrange(countycode)
+range(n_tracts$n_tracts)
+
+n_cities <- claims_places_distinct %>%
+  dplyr::select(countycode, reportedcity) %>%
+  distinct() %>%
+  group_by(countycode) %>%
+  summarise(n_cities = n()) %>%
+  arrange(countycode)
+range(n_cities$n_cities)
+
+n_zips <- claims_places_distinct %>%
+  dplyr::select(countycode, reportedzipcode) %>%
+  distinct() %>%
+  group_by(countycode) %>%
+  summarise(n_zips = n()) %>%
+  arrange(countycode)
+range(n_zips$n_zips)
+```
+
+
+# Spatial 
+
+Following code was used in terminal to download and unzip spatial data
+
+```
+wget -r -np zip ftp://ftp2.census.gov/geo/tiger/TIGER2019/PLACE/
+find . -name "*.zip" -exec unzip {} \;
+
+wget -r -np zip ftp://ftp2.census.gov/geo/tiger/TIGER2019/TRACT/
+find . -name "*.zip" -exec unzip {} -d TRACT \;
+
+wget -r -np zip ftp://ftp2.census.gov/geo/tiger/TIGER2019/UAC/
+find . -name "*.zip" -exec unzip {} -d UAC \;
+
+wget -r -np zip ftp://ftp2.census.gov/geo/tiger/TIGER2019/CBSA/
+find . -name "*.zip" -exec unzip {} -d CBSA \;
+```
+
+Census Tiger shapefiles for places and tracts are in separate files by state
+with pattern `tl_2019_01_tract.shp` or `tl_2019_01_place.shp`
+
+381 of the 54,858 census tracts are not the full 11 character strings. 
+
+```{r}
+claims_places_distinct$censustract %>% 
+  unique() %>%
+  purrr::map_int(~nchar(.x)) %>% 
+  table()
+```
+
+Make a list of the census tracts
+
+```{r}
+claims_census_tracts <- claims_places_distinct$censustract %>% unique()
+```
+
+For each of the census tracts in the claims data
+
+- check that it is 11 characters
+- get first 2 characters for state fips
+- read in tracts file for that state
+- filter to census tract
+- buffer tract and get bounding box
+- look for gauges within bbox
+- get info about sites and record length
+- save data 
+
+```{r}
+claims_census_tract <- claims_census_tracts[3]
+
+get_usgs_sites <- function(claims_census_tract){
+  # make sure census tract is valid
+  if(nchar(claims_census_tract)==11){
+  state_fips <- substr(claims_census_tract, 1, 2)
+  tracts_dir <- "/nfs/public-data/census-tiger-2019/TRACT"
+
+  tract_file <- glue("{tracts_dir}/tl_2019_{state_fips}_tract.shp")
+  tract_sf <- sf::st_read(tract_file) %>%
+    dplyr::filter(GEOID == claims_census_tract)
+
+  mybbox <- tract_sf %>% 
+    st_transform(crs = 2163) %>%
+    st_buffer(dist = 10000) %>% 
+    st_transform(crs = 4326) %>%
+    st_bbox() %>% 
+    as.vector() %>% round(digits = 2)
+
+  # look for usgs sites with discharge within bbox
+  # use error handling to return null if no sites returned
+  tract_sites <- tryCatch({
+    dataRetrieval::whatNWISsites(parameterCd = "00060", 
+                                             bBox = mybbox)},
+    error = function(e) {return(NULL)})
+
+  # only proceed if there are gauges within 10km
+    if(!is.null(tract_sites)){
+  # get info about sites
+  tract_sites_info <- readNWISsite(tract_sites[["site_no"]]) %>%
+    dplyr::select(site_no, state_cd, drain_area_va)
+  
+  # get info about record length
+  site_data <- whatNWISdata(parameterCd = "00060", # discharge
+                                 siteNumber = tract_sites[["site_no"]]) %>%
+    arrange(begin_date) %>%
+    mutate(early_enough = begin_date < "1980-01-01") %>%
+    mutate(late_enough = end_date > "2000-01-01") %>%
+    mutate(count_10obs = count_nu > 10) %>%
+    mutate(good_record = all(early_enough, late_enough, count_10obs))
+ 
+    # make a table with site info of interest and add city name and pop
+  df <- site_data %>%
+    dplyr::select(agency_cd, site_no, station_nm, dec_lat_va, dec_long_va,
+                  huc_cd, data_type_cd, parm_cd, stat_cd, begin_date, end_date,
+                  count_nu, early_enough, late_enough, good_record) %>%
+    mutate(site_no = as.character(site_no)) %>%
+    left_join(tract_sites_info) %>%
+    arrange(site_no)
+  
+  gauges_dir <- "/nfs/khondula-data/projects/river-cities/data/gauges"
+  if(!fs::dir_exists(gauges_dir)){fs::dir_create(gauges_dir)}
+  if(nrow(df) > 0) {readr::write_csv(df, path = glue("{gauges_dir}/tract-{claims_census_tract}.csv"))}
+  
+  }}
+}
+
+
+```
+
+```{r, include = FALSE, eval=FALSE}
+get_usgs_sites(claims_census_tracts[3])
+purrr::walk(claims_census_tracts[1:10], ~get_usgs_sites(.x))
+```
+
+Run on cluster
+
+```{r, eval = FALSE}
+pars <- data.frame(claims_census_tract = claims_census_tracts,
+                   stringsAsFactors = FALSE)
+
+
+sjob <- slurm_apply(get_usgs_sites, 
+                    pars, 
+                    jobname = 'rivercities',
+                    # slurm_options = list(partition = "sesync"),
+                    nodes = 4, 
+                    cpus_per_node = 4,
+                    submit = TRUE)
+
+rslurm::print_job_status(sjob)
+rslurm::cancel_slurm(sjob)
+```
+
+```{r, eval=FALSE}
+length(list.files(gauges_dir))
+```
+
+map example
+
+```{r}
+# city_sites %>%
+#   st_as_sf(coords = c("dec_long_va", "dec_lat_va"), crs = 4326) %>%
+#   leaflet() %>%
+#   addTiles() %>%
+#   addMarkers() %>%
+#   addPolygons(data = state_tracts_sf)
+```
+
+How many claims per tract?
+
+```{r}
+claims_goodtracts <- claims_df %>%
+  filter(!is.na(censustract)) %>%
+  filter(nchar(censustract)==11)
+
+nclaims_by_tract <- claims_goodtracts %>%
+  group_by(censustract) %>%
+  summarise(n_claims = n()) %>%
+  arrange(n_claims) %>%
+  mutate(claims_qum = cumsum(n_claims)) %>%
+  mutate(claims_prop = claims_qum/nrow(claims_goodtracts))
+
+ggplot(nclaims_by_tract, aes(claims_prop)) +
+  stat_ecdf(geom = "step", pad = FALSE) +
+  theme_minimal() +
+  ylab("proportion of tracts with 1 or more claim") +
+  xlab("proportion of claims")
+
+nclaims_by_tract %>%
+  filter(n_claims > 1) %>%
+  ggplot(aes(n_claims)) +
+  geom_histogram() +
+  scale_y_log10() +
+  # scale_x_log10() +
+  theme_minimal() +
+  ylab("Number of tracts")
+
+```
+
+Combine 
+
+```{r}
+# read in all csvs and save as one table
+df <- fs::dir_ls("data") %>% 
+  purrr::map_df(~read_csv(.x, col_types = c("cccddccccDDdllcdcd")))
+
+df %>% readr::write_csv("river-cities.csv")
+
+```
+
+plot UAC shapefile
+
+```{r}
+uac10 <- st_read("/nfs/public-data/census-tiger-2019/UAC/UAC/tl_2019_us_uac10.shp")
+uac10 %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolygons()
+```
+

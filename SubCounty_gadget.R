@@ -13,8 +13,8 @@ library(dplyr)
 # 170 = Consolidated city
 # 172 = Consolidated city -- place within consolidated city
 
-# citytown_long <- readr::read_csv("Subcounty_Intercensal_Pop_2000-2018.csv")
-citytown_long <- vroom::vroom("/nfs/public-data/Census/Census_FineScalePop_2000-2018.csv")
+citytown_long <- vroom::vroom("/nfs/public-data/Census/Subcounty_Intercensal_Pop_2000-2018.csv")
+# citytown_long <- vroom::vroom("/nfs/public-data/Census/Census_FineScalePop_2000-2018.csv")
 
 get_subcounty_data <- function(){
   
@@ -24,12 +24,12 @@ get_subcounty_data <- function(){
   ui <- miniUI::miniPage(
     miniUI::gadgetTitleBar(title = "Get data from"),
     miniUI::miniContentPanel(
-    shiny::fillCol(flex = c(1, 4),
-      fillRow(flex = c(1, 3),
+    shiny::fillRow(flex = c(1, 4),
+      fillCol(flex = c(1, 3),
       shiny::selectizeInput(inputId = "my_state",
                         label = "State:",
                         choices = states,
-                        multiple = TRUE, width = "800px"),
+                        multiple = TRUE),
     shiny::uiOutput('selectorUI_placenames')),
     shiny::plotOutput('myplot')
   )))

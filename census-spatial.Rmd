@@ -1,0 +1,23 @@
+---
+title: "Census spatial"
+output: html_document
+---
+
+Following code was used in terminal to download and unzip spatial data
+
+```
+wget -r -np zip ftp://ftp2.census.gov/geo/tiger/TIGER2019/PLACE/
+  find . -name "*.zip" -exec unzip {} \;
+
+wget -r -np zip ftp://ftp2.census.gov/geo/tiger/TIGER2019/TRACT/
+  find . -name "*.zip" -exec unzip {} -d TRACT \;
+
+wget -r -np zip ftp://ftp2.census.gov/geo/tiger/TIGER2019/UAC/
+  find . -name "*.zip" -exec unzip {} -d UAC \;
+
+wget -r -np zip ftp://ftp2.census.gov/geo/tiger/TIGER2019/CBSA/
+  find . -name "*.zip" -exec unzip {} -d CBSA \;
+```
+
+Census Tiger shapefiles for places and tracts are in separate files by state
+with pattern `tl_2019_01_tract.shp` or `tl_2019_01_place.shp`

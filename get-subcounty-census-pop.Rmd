@@ -187,6 +187,8 @@ cbsa2fips_state <- cbsa2fips %>%
   dplyr::distinct()
 ```
 
+| column | description | 
+|--------|-------------|
 | CBSA | Core based statistical area code |
 | MDIV | Metropolitan division code |
 | STCOU | State and county code |
