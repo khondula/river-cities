@@ -61,5 +61,6 @@ cbsa_long <- cbsa_df %>%
 
 ```{r}
 cbsa_long %>% write_csv(glue("{data_dir}/Census/cbsa_population_long.csv"))
+head(cbsa_long)
 ```
 

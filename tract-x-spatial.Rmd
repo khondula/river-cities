@@ -105,16 +105,12 @@ glue("{data_dir}/census-lookups/tract-x-{census_scale}") %>%
   list.files() %>% 
   length()
 
-tracts_x_census_df <- glue("{data_dir}/census-lookups/tract-x-{census_scale}") %>%
-  list.files(full.names = TRUE) %>%
-  purrr::map_df(~read_csv(.x, col_types = c("ccccccccddddcc")))
-View(tracts_x_census_df)
+# tracts_x_census_df <- glue("{data_dir}/census-lookups/tract-x-{census_scale}") %>%
+#   list.files(full.names = TRUE) %>%
+#   purrr::map_df(~read_csv(.x, col_types = c("ccccccccddddcc")))
+# View(tracts_x_census_df)
 ```
 
-
-For tracts that intersect multiple Places. potentially use the "reportedcity" 
-column to agrep one of the places to use. Otherwise could add up the population
-in both areas. 
 
 ```{r}
 tract_sf %>% 

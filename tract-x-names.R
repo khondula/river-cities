@@ -10,7 +10,7 @@ library(sf)
 data_dir <- "/nfs/khondula-data/projects/river-cities/data"
 claims_tracts11 <- read_csv(glue("{data_dir}/NFIP/claims_tracts11.csv"))
 
-my_tract <- claims_tracts11[["tract"]][3]
+my_tract <- claims_tracts11[["tract"]][3000]
 # my_tract <- claims_tracts_togo[1]
 my_tract
 
@@ -30,6 +30,7 @@ find_tractname_matches <- function(my_tract, agrep_dist = 100,
     filepath2 <- glue::glue("{data_dir}/census-lookups/tracts-noMatches-{census_scale}.csv")
     data.frame(tract = my_tract) %>% readr::write_csv(filepath2, append = TRUE)
   }
+  
   if(nrow(tract_matches) > 0){ # if there are polygons tract overlaps
     
   claims_df_tract <- vroom(claims_data_file, 
@@ -60,20 +61,20 @@ find_tractname_matches <- function(my_tract, agrep_dist = 100,
 find_tractname_matches(my_tract)
 
 claims_tracts11[["tract"]][1:10] %>% 
-  purrr::walk(~find_tractname_matches(.x, agrep_dist = 0.35))
+  purrr::walk(~find_tractname_matches(.x, agrep_dist = 100))
 
 claims_tracts_togo[] %>% 
   purrr::walk(~find_tractname_matches(.x, agrep_dist = 0.35))
 
-names_matching_dir <- glue("{data_dir}/census-lookups/tract-x-{census_scale}")
+names_matching_dir <- glue("{data_dir}/census-lookups/names-matching-{census_scale}")
 list.files(names_matching_dir, full.names = TRUE) %>% length()
   
 list.files(names_matching_dir, full.names = TRUE) %>% 
   map_df(~read_csv(.x, col_types = c("ccccc"))) %>% View()
 
 library(rslurm)
-pars <- data.frame(my_tract = claims_tracts_togo,
-                   agrep_dist = 0.35,
+pars <- data.frame(my_tract = claims_tracts11[["tract"]],
+                   agrep_dist = 100,
                    stringsAsFactors = FALSE)
 
 sjob <- slurm_apply(find_tractname_matches, 
@@ -81,7 +82,7 @@ sjob <- slurm_apply(find_tractname_matches,
                     jobname = 'tractnames',
                     # slurm_options = list(partition = "sesync"),
                     nodes = 20, 
-                    cpus_per_node = 4,
+                    cpus_per_node = 2,
                     submit = TRUE)
 
 claims_tracts <- claims_tracts11[["tract"]]

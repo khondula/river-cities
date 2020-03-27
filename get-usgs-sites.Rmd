@@ -1,7 +1,5 @@
 ---
 title: "get-usgs-sites"
-author: "Kelly Hondula"
-date: "3/25/2020"
 output: html_document
 ---
 
@@ -9,94 +7,142 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
-Make a list of the census tracts
-
 ```{r}
-claims_census_tracts <- claims_places_distinct$censustract %>% unique()
+library(dataRetrieval)
+library(rosm)
+library(RStoolbox)
+library(sf)
+library(fs)
+library(leaflet)
+library(ggplot2)
+library(dplyr)
+library(glue)
+library(ggrepel)
 ```
 
-For each of the census tracts in the claims data
+Find gauge for each CBSA
 
-- check that it is 11 characters
-- get first 2 characters for state fips
-- read in tracts file for that state
-- filter to census tract
-- buffer tract and get bounding box
+```{r}
+cbsa_dir <- "/nfs/public-data/census-tiger-2019/CBSA"
+cbsa_file <- glue("{cbsa_dir}/tl_2019_us_cbsa.shp")
+cbsa_sf <- sf::st_read(cbsa_file)
+```
+
+```{r}
+my_cbsa <- cbsa_sf[["GEOID"]][380]
+```
+
 - look for gauges within bbox
 - get info about sites and record length
 - save data 
 
 ```{r}
-claims_census_tract <- claims_census_tracts[3]
 
-get_usgs_sites <- function(claims_census_tract){
-  # make sure census tract is valid
-  if(nchar(claims_census_tract)==11){
-  state_fips <- substr(claims_census_tract, 1, 2)
-  tracts_dir <- "/nfs/public-data/census-tiger-2019/TRACT"
+get_usgs_sites <- function(my_cbsa){
 
-  tract_file <- glue("{tracts_dir}/tl_2019_{state_fips}_tract.shp")
-  tract_sf <- sf::st_read(tract_file) %>%
-    dplyr::filter(GEOID == claims_census_tract)
+  cbsa_dir <- "/nfs/public-data/census-tiger-2019/CBSA"
+  cbsa_file <- glue("{cbsa_dir}/tl_2019_us_cbsa.shp")
+  my_cbsa_sf <- sf::st_read(cbsa_file) %>%
+    dplyr::filter(GEOID == my_cbsa)
 
-  mybbox <- tract_sf %>% 
-    st_transform(crs = 2163) %>%
-    st_buffer(dist = 10000) %>% 
-    st_transform(crs = 4326) %>%
-    st_bbox() %>% 
-    as.vector() %>% round(digits = 2)
-
+  my_bbox <- my_cbsa_sf %>% st_bbox()
   # look for usgs sites with discharge within bbox
   # use error handling to return null if no sites returned
-  tract_sites <- tryCatch({
+  usgs_sites <- tryCatch({
     dataRetrieval::whatNWISsites(parameterCd = "00060", 
-                                             bBox = mybbox)},
+                                             bBox = my_bbox)},
     error = function(e) {return(NULL)})
-
-  # only proceed if there are gauges within 10km
-    if(!is.null(tract_sites)){
+  # only proceed if there are gauges
+  if(!is.null(usgs_sites)){
   # get info about sites
-  tract_sites_info <- readNWISsite(tract_sites[["site_no"]]) %>%
+  usgs_sites_info <- readNWISsite(usgs_sites[["site_no"]]) %>%
     dplyr::select(site_no, state_cd, drain_area_va)
-  
   # get info about record length
   site_data <- whatNWISdata(parameterCd = "00060", # discharge
-                                 siteNumber = tract_sites[["site_no"]]) %>%
+                                 siteNumber = usgs_sites[["site_no"]]) %>%
     arrange(begin_date) %>%
     mutate(early_enough = begin_date < "1980-01-01") %>%
     mutate(late_enough = end_date > "2000-01-01") %>%
-    mutate(count_10obs = count_nu > 10) %>%
-    mutate(good_record = all(early_enough, late_enough, count_10obs))
- 
-    # make a table with site info of interest and add city name and pop
-  df <- site_data %>%
+    mutate(count_10obs = count_nu > 10)
+  
+  site_data_goodrecords <- site_data %>% 
+    dplyr::filter(early_enough, late_enough, count_10obs)
+  
+  if(nrow(site_data_goodrecords) > 0){
+    
+  good_sites_sf <- site_data_goodrecords %>% 
+    dplyr::select(site_no, dec_lat_va, dec_long_va) %>% 
+    distinct() %>%
+    st_as_sf(coords = c("dec_long_va", "dec_lat_va"), crs = 4326)
+
+  # make a table with site info of interest and add city name and pop
+  df <- site_data_goodrecords %>%
     dplyr::select(agency_cd, site_no, station_nm, dec_lat_va, dec_long_va,
                   huc_cd, data_type_cd, parm_cd, stat_cd, begin_date, end_date,
-                  count_nu, early_enough, late_enough, good_record) %>%
+                  count_nu) %>%
     mutate(site_no = as.character(site_no)) %>%
-    left_join(tract_sites_info) %>%
-    arrange(site_no)
+    arrange(site_no) %>%
+    left_join(usgs_sites_info) %>%
+    mutate(cbsa_geoid = my_cbsa_sf$GEOID,
+           cbsa_name = my_cbsa_sf$NAME)
   
-  gauges_dir <- "/nfs/khondula-data/projects/river-cities/data/gauges"
+  gauges_dir <- "/nfs/khondula-data/projects/river-cities/data/gauges-cbsa"
   if(!fs::dir_exists(gauges_dir)){fs::dir_create(gauges_dir)}
-  if(nrow(df) > 0) {readr::write_csv(df, path = glue("{gauges_dir}/tract-{claims_census_tract}.csv"))}
+  if(nrow(df) > 0) {readr::write_csv(df, path = glue("{gauges_dir}/cbsa-{my_cbsa_sf$GEOID}.csv"))}
   
-  }}
+    myextent <- sp::bbox(as(my_cbsa_sf, "Spatial"))
+    osm1 <- osm.raster(myextent)
+    
+    my_cbsa_prj <- sf::st_transform(my_cbsa_sf, 3857)
+    good_sites_prj <- sf::st_transform(good_sites_sf, 3857)
+    
+    good_sites_prj$lat <- st_coordinates(good_sites_prj) %>% 
+      as.data.frame() %>% pull(Y)
+    good_sites_prj$lon <- st_coordinates(good_sites_prj) %>% 
+      as.data.frame() %>% pull(X)
+
+    m1 <- ggRGB(osm1, ggObj = TRUE, r = 1, g = 2, b = 3)
+    m2 <- m1 +
+      geom_sf(data = my_cbsa_prj, 
+              color = "purple",
+              fill = "purple", 
+              alpha = 0.05) +
+      # geom_sf(data = flowlines_list_sf,
+      #         color = "dodgerblue") +
+      geom_sf(data = good_sites_sf) +
+      ggrepel::geom_text_repel(
+        data = good_sites_prj,
+        aes(x = lon, y = lat, label = site_no),
+        nudge_y = 0.1
+      ) +
+      theme_minimal() +
+      ggtitle(glue::glue("{my_cbsa_sf$NAME}")) +
+      xlab(element_blank()) +
+      ylab(element_blank())
+   
+    data_dir <- "/nfs/khondula-data/projects/river-cities/data"
+      mapfile <- glue::glue("{data_dir}/maps/gauges_{my_cbsa_sf$NAME}.pdf")
+      pdf(mapfile, height = 10, width = 8)
+       print(m2)
+      dev.off()
+    }
+  }
 }
+
 
 
 ```
 
 ```{r, include = FALSE, eval=FALSE}
-get_usgs_sites(claims_census_tracts[3])
-purrr::walk(claims_census_tracts[1:10], ~get_usgs_sites(.x))
+get_usgs_sites(cbsa_sf$GEOID[62])
+purrr::walk(cbsa_sf$GEOID[63:70], ~get_usgs_sites(.x))
 ```
 
 Run on cluster
 
 ```{r, eval = FALSE}
-pars <- data.frame(claims_census_tract = claims_census_tracts,
+library(rslurm)
+pars <- data.frame(my_cbsa = cbsa_sf$GEOID[71:938],
                    stringsAsFactors = FALSE)
 
 
@@ -104,7 +150,7 @@ sjob <- slurm_apply(get_usgs_sites,
                     pars, 
                     jobname = 'rivercities',
                     # slurm_options = list(partition = "sesync"),
-                    nodes = 4, 
+                    nodes = 20, 
                     cpus_per_node = 4,
                     submit = TRUE)
 
