@@ -13,14 +13,15 @@ leaflet_gauges_map("14540")
 
 leaflet_gauges_map <- function(my_cbsa_geoid){
   
-  # data on gauges with  begin_date < "1980-01-01"
-  # end_date > "2000-01-01" and count_nu > 10
-  gauges_dir <- "/nfs/public-data/NFIP/gauges-cbsa"
-  gauges_geoids <- list.files(gauges_dir) %>% substr(6,10)
+  # data on gauges with  begin_date < "1950-01-01"
+  # end_date > "2019-01-01" and count_nu > 10
+  gauges_df <- readr::read_csv("/nfs/public-data/NFIP/gauges-cbsa-M1.csv",
+                               col_types = "cccddccccDDdcdcc")
+  gauges_geoids <- gauges_df[["cbsa_geoid"]] %>% unique()
   if(!my_cbsa_geoid %in% gauges_geoids){stop("No good gauges")}
   
-  gauges_file <- glue("{gauges_dir}/cbsa-{my_cbsa_geoid}.csv")
-  good_sites_sf <- readr::read_csv(gauges_file, col_types = "cccddccccDDdcdcc") %>%
+  good_sites_sf <- gauges_df %>%
+    dplyr::filter(cbsa_geoid == my_cbsa_geoid) %>%
     dplyr::select(site_no, station_nm, dec_lat_va, dec_long_va, 
                   begin_date, end_date, count_nu, drain_area_va) %>%
     st_as_sf(coords = c("dec_long_va", "dec_lat_va"), crs = 4269)

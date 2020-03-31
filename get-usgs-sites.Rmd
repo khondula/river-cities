@@ -15,6 +15,7 @@ library(sf)
 library(fs)
 library(leaflet)
 library(ggplot2)
+library(readr)
 library(dplyr)
 library(glue)
 library(ggrepel)
@@ -25,11 +26,14 @@ Find gauge for each CBSA
 ```{r}
 cbsa_dir <- "/nfs/public-data/census-tiger-2019/CBSA"
 cbsa_file <- glue("{cbsa_dir}/tl_2019_us_cbsa.shp")
-cbsa_sf <- sf::st_read(cbsa_file)
+cbsa_sf <- sf::st_read(cbsa_file) %>% dplyr::filter(LSAD == "M1")
 ```
 
+392 Metro areas (50K+)
+
 ```{r}
-my_cbsa <- cbsa_sf[["GEOID"]][380]
+m1_cbsas <- unique(cbsa_sf$GEOID)
+my_cbsa <- cbsa_sf[["GEOID"]][1]
 ```
 
 - look for gauges within bbox
@@ -61,8 +65,8 @@ get_usgs_sites <- function(my_cbsa){
   site_data <- whatNWISdata(parameterCd = "00060", # discharge
                                  siteNumber = usgs_sites[["site_no"]]) %>%
     arrange(begin_date) %>%
-    mutate(early_enough = begin_date < "1980-01-01") %>%
-    mutate(late_enough = end_date > "2000-01-01") %>%
+    mutate(early_enough = begin_date < "1950-01-01") %>%
+    mutate(late_enough = end_date > "2019-01-01") %>%
     mutate(count_10obs = count_nu > 10)
   
   site_data_goodrecords <- site_data %>% 
@@ -86,7 +90,7 @@ get_usgs_sites <- function(my_cbsa){
     mutate(cbsa_geoid = my_cbsa_sf$GEOID,
            cbsa_name = my_cbsa_sf$NAME)
   
-  gauges_dir <- "/nfs/khondula-data/projects/river-cities/data/gauges-cbsa"
+  gauges_dir <- "/nfs/khondula-data/projects/river-cities/data/gauges-cbsa-M1"
   if(!fs::dir_exists(gauges_dir)){fs::dir_create(gauges_dir)}
   if(nrow(df) > 0) {readr::write_csv(df, path = glue("{gauges_dir}/cbsa-{my_cbsa_sf$GEOID}.csv"))}
   
@@ -121,28 +125,28 @@ get_usgs_sites <- function(my_cbsa){
       ylab(element_blank())
    
     data_dir <- "/nfs/khondula-data/projects/river-cities/data"
-      mapfile <- glue::glue("{data_dir}/maps/gauges_{my_cbsa_sf$NAME}.pdf")
+    map_dir <- glue::glue("{data_dir}/maps-gauges-M1/")
+      mapfile <- glue::glue("{map_dir}/gauges-M1-1950_{my_cbsa_sf$NAME}.pdf")
       pdf(mapfile, height = 10, width = 8)
-       print(m2)
+      print(m2)
       dev.off()
     }
   }
 }
 
-
-
 ```
 
 ```{r, include = FALSE, eval=FALSE}
-get_usgs_sites(cbsa_sf$GEOID[62])
-purrr::walk(cbsa_sf$GEOID[63:70], ~get_usgs_sites(.x))
+get_usgs_sites(m1_cbsas[2])
+
+purrr::walk(m1_cbsas[51:0], ~get_usgs_sites(.x))
 ```
 
 Run on cluster
 
 ```{r, eval = FALSE}
 library(rslurm)
-pars <- data.frame(my_cbsa = cbsa_sf$GEOID[71:938],
+pars <- data.frame(my_cbsa = m1_cbsas[51:392],
                    stringsAsFactors = FALSE)
 
 
@@ -166,9 +170,11 @@ Combine
 
 ```{r}
 # read in all csvs and save as one table
-df <- fs::dir_ls("data") %>% 
-  purrr::map_df(~read_csv(.x, col_types = c("cccddccccDDdllcdcd")))
+gauges_dir <- "/nfs/khondula-data/projects/river-cities/data/gauges-cbsa-M1"
 
-df %>% readr::write_csv("river-cities.csv")
+df <- fs::dir_ls(gauges_dir) %>% 
+  purrr::map_df(~read_csv(.x, col_types = c("cccddccccDDdcdcc")))
 
+df %>% readr::write_csv("gauges-cbsa-M1.csv")
+df %>% readr::write_csv("/nfs/public-data/NFIP/gauges-cbsa-M1.csv")
 ```
