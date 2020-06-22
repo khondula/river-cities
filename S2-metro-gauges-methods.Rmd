@@ -10,7 +10,7 @@ editor_options:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, message = FALSE)
 ```
 
 Get the source code for this notebook on Github [here](https://github.com/khondula/river-cities).
@@ -32,6 +32,7 @@ library(purrr)
 library(scales)
 library(leaflet)
 library(knitr)
+library(tidycensus)
 ```
 
 # Datasets 
@@ -260,9 +261,47 @@ leaflet_gauges_map <- function(my_cbsa_geoid){
 
 ```
 
-To view gauges for a given city based on its GEOID. Click a marker to see info about the site and discharge record. 
+To view gauges for a given city based on its [GEOID](https://github.com/khondula/river-cities/blob/master/river-cities-data/reference-tables/cbsa-geoids.csv). Click a marker to see info about the site and discharge record. 
+
+```{r, warning=FALSE}
+leaflet_gauges_map("10500")
+```
+
+# Demographic characteristics from American Community Survey
+
+Configure settings for `tidycensus` package.
 
 ```{r}
-leaflet_gauges_map("10180")
+my_key <- scan("my-census-api-key", "")
+census_api_key(my_key)
+acs_vars_df <- load_variables(dataset = "acs5", year = "2018")
+cbsa_geograhpy <- "metropolitan statistical area/micropolitan statistical area"
+```
+
+Example of browsing ACS to find variable codes using string matching
+
+```{r}
+my_vars <- acs_vars_df %>%
+  dplyr::filter(stringr::str_detect(label, "Built")) %>% # string matching for "Built"
+  dplyr::select(name, label, concept)
+
+unique(my_vars$concept)
+```
+
+## Query ACS data for a set of variables 
+
+```{r}
+my_data <- get_acs(geography = cbsa_geograhpy,
+                   variables = my_vars[["name"]],
+                   year = 2018, # default
+                   survey = "acs5" # default
+                   )
+```
+
+Join with variable names
+
+```{r}
+my_data %>% 
+  left_join(acs_vars_df, by = c("variable" = "name"))
 ```
 
