@@ -128,10 +128,10 @@ fc_dams_cbsa_df <- list.files('cbsa-dams-files/', full.names = TRUE) %>%
 
 head(fc_dams_cbsa_df)
 
-fc_dams_cbsa_df %>% group_by(GEOID, NAME) %>%
+fc_dams_cbsa_summary <- fc_dams_cbsa_df %>% group_by(GEOID, NAME) %>%
   summarise(n_dams = n(),
-            max_dam_height = max(nid_height)) %>%
-  write_csv('flood-control-dams-summary.csv')
+            max_dam_height = max(nid_height))
+write_csv(fc_dams_cbsa_summary, 'flood-control-dams-summary.csv')
 write_csv(fc_dams_cbsa_df, 'flood-control-dams-cbsa.csv')
 ########### leaflet map function ###############
 
