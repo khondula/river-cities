@@ -1,41 +1,31 @@
-# infrastructure data
-# global dam watch guide to dam datasets
-# http://globaldamwatch.org/data/
+# update to get infrastructure data
 
 library(tidyverse)
 library(glue)
 library(sf)
-library(rosm)
-library(dams)
 library(colorspace)
 library(leaflet)
 library(raster)
 library(RStoolbox)
+library(rosm)
+library(dams)
 
-dams <- dams::get_nid() # 91,457 records
-# data dictionary: https://files.hawaii.gov/dbedt/op/gis/data/nid_dams_data_dictionary.htm
+dams <- dams::get_nid(overwrite = FALSE) # 91,457 records
 dams <- dams %>%
   dplyr::select(recordid, dam_name, nidid,
                 longitude, latitude, county, river, city, distance,
                 year_completed,
                 owner_type, dam_type, purposes, nid_height)
 
-# coords are at dam centerline as a single value in decimal degrees, NAD83.
-
-# owner types
-# F for Federal;
-# S for State;
-# L for Local Government (defined as have taxing authority or is supported by taxes); U for Public Utility;
-# P for Private
-# X for Not Listed.
-
-# 18304 dams with C in purpose
+# filter to just flood control dams (18,304)
 fc_dams <- dams %>% 
-  mutate(floodcontrol = str_detect(purposes, "C"),
+  dplyr::mutate(floodcontrol = str_detect(purposes, "C"),
          floodcontrol_primary = str_starts(purposes, "C")) %>%
-  filter(floodcontrol)
-
-# 17,026 of those have flood control as primary purpose
+  dplyr::filter(floodcontrol)
+rm(dams)
+# for visualization
+# categorize dam heights
+# and identify primary owner type 
 fc_dams <- fc_dams %>% 
   mutate(height_category = case_when(nid_height == 0 ~ "A 0ft",
                                      nid_height > 0 & nid_height <= 15 ~ "B <15ft",
@@ -45,36 +35,36 @@ fc_dams <- fc_dams %>%
                                      nid_height > 100 ~ "F >100ft")) %>%
   mutate(owner_type_first = str_sub(owner_type, 1, 1))
 
-head(fc_dams)
+# convert to spatial object
+# 10 without coordinates
+# fc_dams %>% filter(is.na(longitude)) 
+fc_dams_sf <- filter(fc_dams, !is.na(longitude)) %>%
+                       st_as_sf(coords = c("longitude", "latitude")) %>%
+                       st_set_crs(4269)
 
-scales::show_col(sequential_hcl(6, "Batlow"))
-scales::show_col(sequential_hcl(6, "Hawaii"))
-
-# 10 are missing coordinates
-
-fc_dams_sf <- st_as_sf(filter(fc_dams, !is.na(longitude)), 
-                       coords = c("longitude", "latitude")) %>%
-  st_set_crs(4269)
-
-# Most of those (16,850 out of 18,294) have an associated city
-# but it is unlikely those match with the city names from census
-data_dir <- "river-cities-data"
-cbsa_shp <- glue("{data_dir}/tl_2019_us_cbsa.shp")
+# metro areas shapefile
+cbsa_shp <- "river-cities-data/tl_2019_us_cbsa.shp"
 cbsa_sf <- sf::st_read(cbsa_shp) %>% dplyr::filter(LSAD == "M1")
 
 my_geoid <- cbsa_sf$GEOID[101]
-cbsa_sf %>% dplyr::filter(GEOID == cbsa_sf$GEOID[221]) %>% pull(NAME)
+# cbsa_sf %>% dplyr::filter(GEOID == cbsa_sf$GEOID[101]) %>% pull(NAME)
 
-save_dams_cbsa_map <- function(my_geoid){
-  
+# find dams within a metro area and save data and map
+# include dams within a 30 km buffer on the map
+
+save_dams_cbsa_map <- function(my_geoid, savemap = TRUE){
+  # subset metro area to 1 city and make a buffer 
   my_cbsa_sf <- cbsa_sf %>% dplyr::filter(GEOID == my_geoid)
   my_cbsa_sf_buffer <- my_cbsa_sf %>% st_transform(5070) %>% 
     st_buffer(3e4) %>% st_transform(st_crs(fc_dams_sf))
   
   my_fc_dams_sf_buff <- fc_dams_sf %>% st_intersection(my_cbsa_sf_buffer)
   my_fc_dams_sf <- fc_dams_sf %>% st_intersection(my_cbsa_sf)
-  write_csv(my_fc_dams_sf, glue('cbsa-dams-files/flood-control-dams-in_{my_cbsa_sf$NAME}.csv'))
+  my_fc_dams_df <- my_fc_dams_sf %>% st_drop_geometry() %>%
+    dplyr::select(c(GEOID,NAME,NAMELSAD,LSAD,1:16))
+  write_csv(my_fc_dams_df, glue('cbsa-dams-files/flood-control-dams-in_{my_cbsa_sf$NAME}.csv'))
   
+  if(savemap){
   if(nrow(my_fc_dams_sf) > 0){
   myextent <- sp::bbox(as(my_cbsa_sf_buffer, "Spatial"))
   osm1 <- osm.raster(myextent)
@@ -105,28 +95,44 @@ save_dams_cbsa_map <- function(my_geoid){
   mapfile <- glue::glue("maps-dams/flood-control-dams_{my_cbsa_sf$NAME}.pdf")
   ggsave(mapfile, m2, width = 8, height = 6)
   }
+  }
 }
+
 save_dams_cbsa_map(cbsa_sf$GEOID[142]) # stopped at.. with invalid geometry
 save_dams_cbsa_map(cbsa_sf$GEOID[222]) # stopped at.. cant open file
 save_dams_cbsa_map(cbsa_sf$GEOID[231]) # stopped at.. cant open file
 
-cbsa_sf$GEOID[1:10] %>% walk(~save_dams_cbsa_map(.x))
-cbsa_sf$GEOID[11:30] %>% walk(~save_dams_cbsa_map(.x))
-cbsa_sf$GEOID[31:50] %>% walk(~save_dams_cbsa_map(.x))
-cbsa_sf$GEOID[71:100] %>% walk(~save_dams_cbsa_map(.x))
-cbsa_sf$GEOID[101:130] %>% walk(~save_dams_cbsa_map(.x)) # ?
-cbsa_sf$GEOID[143:160] %>% walk(~save_dams_cbsa_map(.x)) 
-cbsa_sf$GEOID[161:190] %>% walk(~save_dams_cbsa_map(.x))
-cbsa_sf$GEOID[223:230] %>% walk(~save_dams_cbsa_map(.x))
-cbsa_sf$GEOID[232:260] %>% walk(~save_dams_cbsa_map(.x))
-cbsa_sf$GEOID[261:290] %>% walk(~save_dams_cbsa_map(.x))
-cbsa_sf$GEOID[291:330] %>% walk(~save_dams_cbsa_map(.x))
-cbsa_sf$GEOID[331:360] %>% walk(~save_dams_cbsa_map(.x))
-cbsa_sf$GEOID[361:392] %>% walk(~save_dams_cbsa_map(.x))
+# slow internet, just do a few at a time
+# cbsa_sf$GEOID[1:10] %>% walk(~save_dams_cbsa_map(.x, savemap = FALSE))
+# cbsa_sf$GEOID[11:30] %>% walk(~save_dams_cbsa_map(.x))
+# cbsa_sf$GEOID[31:60] %>% walk(~save_dams_cbsa_map(.x))
+# cbsa_sf$GEOID[61:90] %>% walk(~save_dams_cbsa_map(.x))
+# cbsa_sf$GEOID[91:100] %>% walk(~save_dams_cbsa_map(.x))
+# cbsa_sf$GEOID[101:130] %>% walk(~save_dams_cbsa_map(.x))
+# cbsa_sf$GEOID[131:141] %>% walk(~save_dams_cbsa_map(.x))
+# cbsa_sf$GEOID[143:160] %>% walk(~save_dams_cbsa_map(.x)) 
+# cbsa_sf$GEOID[161:190] %>% walk(~save_dams_cbsa_map(.x))
+# cbsa_sf$GEOID[191:221] %>% walk(~save_dams_cbsa_map(.x))
+# cbsa_sf$GEOID[223:230] %>% walk(~save_dams_cbsa_map(.x))
+# cbsa_sf$GEOID[232:260] %>% walk(~save_dams_cbsa_map(.x))
+# cbsa_sf$GEOID[261:290] %>% walk(~save_dams_cbsa_map(.x))
+# cbsa_sf$GEOID[291:330] %>% walk(~save_dams_cbsa_map(.x))
+# 
+# cbsa_sf$GEOID[331:360] %>% walk(~save_dams_cbsa_map(.x))
+# cbsa_sf$GEOID[361:392] %>% walk(~save_dams_cbsa_map(.x))
 
+list.files('cbsa-dams-files/', full.names = TRUE)[1] %>% map(~read_csv(.x))
+# some have 29 columns?
+fc_dams_cbsa_df <- list.files('cbsa-dams-files/', full.names = TRUE) %>% 
+  map_df(~read_csv(.x, col_types = 'ccccccccccddcccdllcc'))
 
+head(fc_dams_cbsa_df)
 
-
+fc_dams_cbsa_df %>% group_by(GEOID, NAME) %>%
+  summarise(n_dams = n(),
+            max_dam_height = max(nid_height)) %>%
+  write_csv('flood-control-dams-summary.csv')
+write_csv(fc_dams_cbsa_df, 'flood-control-dams-cbsa.csv')
 ########### leaflet map function ###############
 
 # leaflet() %>%
