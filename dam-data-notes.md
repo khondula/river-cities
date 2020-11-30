@@ -4,7 +4,7 @@
 
 ## NID data
 
-* NID data available in the R package NID (91,457 total records)
+* NID data available in the R package dams (91,457 total records)
 * data dictionary with all variables: https://files.hawaii.gov/dbedt/op/gis/data/nid_dams_data_dictionary.htm
 * coords are at dam centerline as a single value in decimal degrees, NAD83.
 * 18,304 out of 91,457 include flood control as a purpose. 93% of those (17,026) have flood control as primary purpose

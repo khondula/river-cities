@@ -98,6 +98,9 @@ save_dams_cbsa_map <- function(my_geoid, savemap = TRUE){
   }
 }
 
+cbsa_sf %>% dplyr::filter(GEOID == cbsa_sf$GEOID[142]) %>% pull(NAME)
+cbsa_sf %>% dplyr::filter(GEOID == cbsa_sf$GEOID[222]) %>% pull(NAME)
+cbsa_sf %>% dplyr::filter(GEOID == cbsa_sf$GEOID[231]) %>% pull(NAME)
 save_dams_cbsa_map(cbsa_sf$GEOID[142]) # stopped at.. with invalid geometry
 save_dams_cbsa_map(cbsa_sf$GEOID[222]) # stopped at.. cant open file
 save_dams_cbsa_map(cbsa_sf$GEOID[231]) # stopped at.. cant open file
