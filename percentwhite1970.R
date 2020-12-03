@@ -27,6 +27,13 @@ pop_join <- pop_df %>%
   left_join(cbsa_metro, by = c("STATEFP" = "statefips", "COUNTYFP" = "countyfips")) %>%
   filter(!is.na(geoid))
 
+# get dc value from places scale data
+places_colnames <- read_csv('census-data/nhgis0007_csv/nhgis0007_ts_nominal_place.csv', n_max = 1)
+places_df <- read_csv('census-data/nhgis0007_csv/nhgis0007_ts_nominal_place.csv', skip = 2, col_names = colnames(places_colnames))
+dc_b18aa <- dplyr::filter(tracts_df, YEAR == 1970) %>% filter(STATE == "District Of Columbia") %>% pull(B18AA)
+
+pop_join <- pop_join %>% mutate(B18AA = case_when(STATE == "District Of Columbia" ~ dc_b18aa, TRUE ~ B18AA))
+
 # summarize total population and white by CBSA
 # calculate percent white
 cbsa1970 <- pop_join %>% 
@@ -35,4 +42,6 @@ cbsa1970 <- pop_join %>%
             totalwhite = sum(B18AA)) %>%
   mutate(percent_white = totalwhite/total1970)
 
+
 cbsa1970 %>% write_csv('cbsa1970-percentwhite.csv')
+cbsa_sf$NAME[!cbsa_sf$NAME %in% cbsa1970$cbsa_name]
