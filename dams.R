@@ -43,14 +43,19 @@ fc_dams_sf <- filter(fc_dams, !is.na(longitude)) %>%
                        st_set_crs(4269)
 
 # metro areas shapefile
-cbsa_shp <- "river-cities-data/tl_2019_us_cbsa.shp"
+cbsa_shp <- "data/tiger/tl_2019_us_cbsa.shp"
 cbsa_sf <- sf::st_read(cbsa_shp) %>% dplyr::filter(LSAD == "M1")
 
-my_geoid <- cbsa_sf$GEOID[101]
+# my_geoid <- cbsa_sf$GEOID[101]
 # cbsa_sf %>% dplyr::filter(GEOID == cbsa_sf$GEOID[101]) %>% pull(NAME)
 
 # find dams within a metro area and save data and map
 # include dams within a 30 km buffer on the map
+
+fc_dams_dir <- 'cbsa-dams-files'
+if(!dir.exists(fc_dams_dir)){fs::dir_create(fc_dams_dir)}
+fc_dams_map_dir <- 'maps-dams'
+if(!dir.exists(fc_dams_map_dir)){fs::dir_create(fc_dams_map_dir)}
 
 save_dams_cbsa_map <- function(my_geoid, savemap = TRUE){
   # subset metro area to 1 city and make a buffer 
@@ -62,7 +67,8 @@ save_dams_cbsa_map <- function(my_geoid, savemap = TRUE){
   my_fc_dams_sf <- fc_dams_sf %>% st_intersection(my_cbsa_sf)
   my_fc_dams_df <- my_fc_dams_sf %>% st_drop_geometry() %>%
     dplyr::select(c(GEOID,NAME,NAMELSAD,LSAD,1:16))
-  write_csv(my_fc_dams_df, glue('cbsa-dams-files/flood-control-dams-in_{my_cbsa_sf$NAME}.csv'))
+
+  write_csv(my_fc_dams_df, glue('{fc_dams_dir}/flood-control-dams-in_{my_cbsa_sf$NAME}.csv'))
   
   if(savemap){
   if(nrow(my_fc_dams_sf) > 0){
@@ -92,91 +98,25 @@ save_dams_cbsa_map <- function(my_geoid, savemap = TRUE){
              ylim = c(st_bbox(my_cbsa_buff_prj)$ymin, st_bbox(my_cbsa_buff_prj)$ymax)) +
     guides(fill=guide_legend(override.aes=list(shape=21)))
   
-  mapfile <- glue::glue("maps-dams/flood-control-dams_{my_cbsa_sf$NAME}.pdf")
+
+  mapfile <- glue::glue("{fc_dams_map_dir}/flood-control-dams_{my_cbsa_sf$NAME}.pdf")
   ggsave(mapfile, m2, width = 8, height = 6)
   }
   }
 }
 
-cbsa_sf %>% dplyr::filter(GEOID == cbsa_sf$GEOID[142]) %>% pull(NAME)
-cbsa_sf %>% dplyr::filter(GEOID == cbsa_sf$GEOID[222]) %>% pull(NAME)
-cbsa_sf %>% dplyr::filter(GEOID == cbsa_sf$GEOID[231]) %>% pull(NAME)
-save_dams_cbsa_map(cbsa_sf$GEOID[142]) # stopped at.. with invalid geometry
-save_dams_cbsa_map(cbsa_sf$GEOID[222]) # stopped at.. cant open file
-save_dams_cbsa_map(cbsa_sf$GEOID[231]) # stopped at.. cant open file
+# if slow internet, just do a few at a time
+cbsa_sf$GEOID %>% walk(~save_dams_cbsa_map(.x, savemap = FALSE))
 
-# slow internet, just do a few at a time
-# cbsa_sf$GEOID[1:10] %>% walk(~save_dams_cbsa_map(.x, savemap = FALSE))
-# cbsa_sf$GEOID[11:30] %>% walk(~save_dams_cbsa_map(.x))
-# cbsa_sf$GEOID[31:60] %>% walk(~save_dams_cbsa_map(.x))
-# cbsa_sf$GEOID[61:90] %>% walk(~save_dams_cbsa_map(.x))
-# cbsa_sf$GEOID[91:100] %>% walk(~save_dams_cbsa_map(.x))
-# cbsa_sf$GEOID[101:130] %>% walk(~save_dams_cbsa_map(.x))
-# cbsa_sf$GEOID[131:141] %>% walk(~save_dams_cbsa_map(.x))
-# cbsa_sf$GEOID[143:160] %>% walk(~save_dams_cbsa_map(.x)) 
-# cbsa_sf$GEOID[161:190] %>% walk(~save_dams_cbsa_map(.x))
-# cbsa_sf$GEOID[191:221] %>% walk(~save_dams_cbsa_map(.x))
-# cbsa_sf$GEOID[223:230] %>% walk(~save_dams_cbsa_map(.x))
-# cbsa_sf$GEOID[232:260] %>% walk(~save_dams_cbsa_map(.x))
-# cbsa_sf$GEOID[261:290] %>% walk(~save_dams_cbsa_map(.x))
-# cbsa_sf$GEOID[291:330] %>% walk(~save_dams_cbsa_map(.x))
-# 
-# cbsa_sf$GEOID[331:360] %>% walk(~save_dams_cbsa_map(.x))
-# cbsa_sf$GEOID[361:392] %>% walk(~save_dams_cbsa_map(.x))
-
-list.files('cbsa-dams-files/', full.names = TRUE)[1] %>% map(~read_csv(.x))
-# some have 29 columns?
-fc_dams_cbsa_df <- list.files('cbsa-dams-files/', full.names = TRUE) %>% 
+# read in all csvs and combine
+fc_dams_cbsa_df <- list.files(fc_dams_dir, full.names = TRUE) %>% 
   map_df(~read_csv(.x, col_types = 'ccccccccccddcccdllcc'))
 
-head(fc_dams_cbsa_df)
-
-fc_dams_cbsa_summary <- fc_dams_cbsa_df %>% group_by(GEOID, NAME) %>%
+# summarise n dams and max dam height by cbsa
+fc_dams_cbsa_summary <- fc_dams_cbsa_df %>% 
+  group_by(GEOID, NAME) %>%
   summarise(n_dams = n(),
             max_dam_height = max(nid_height))
-write_csv(fc_dams_cbsa_summary, 'flood-control-dams-summary.csv')
-write_csv(fc_dams_cbsa_df, 'flood-control-dams-cbsa.csv')
-########### leaflet map function ###############
 
-# leaflet() %>%
-#   addProviderTiles(providers$Esri.WorldImagery, 
-#                    group = "Satellite Imagery") %>%
-#   addTiles(group = "Open Street Map") %>%
-#   addPolygons(data = my_cbsa_sf_buffer) %>%
-#   addPolygons(data = my_cbsa_sf, popup = ~NAMELSAD,
-#               fillOpacity = 0) %>%
-#   addMarkers(data = fc_dams_sf, 
-#              popup = ~glue("{dam_name}<br>{river}<br> 
-#                {distance} miles from {city}<br>"))
-# 
-# leaflet_dams_map <- function(my_cbsa_geoid){
-#   my_cbsa_sf <- cbsa_sf %>% dplyr::filter(GEOID == my_cbsa_geoid)
-#   
-# nhd <- "https://hydro.nationalmap.gov/arcgis/services/nhd/MapServer/WMSServer"
-# wbd <- "https://hydro.nationalmap.gov/arcgis/services/wbd/MapServer/WMSServer"
-# 
-# ll <- leaflet() %>%
-#   addProviderTiles(providers$Esri.WorldImagery, 
-#                    group = "Satellite Imagery") %>%
-#   addTiles(group = "Open Street Map") %>%
-#   addPolygons(data = my_cbsa_sf, popup = ~NAMELSAD,
-#               fillOpacity = 0) %>%
-#   addMarkers(data = fc_dams_sf, 
-#              popup = ~glue("{dam_name}<br>{river}<br> 
-#                {distance} miles from {city}<br>"))
-#   # addWMSTiles(nhd, 
-#               # layers = list("5", "6", "9", "10"),
-#               # options = WMSTileOptions(format = "image/png",
-#                                        # transparent = TRUE),
-#               # group = "NHD") %>%
-#   # addWMSTiles(wbd, layers = list("7"),
-#               # options = WMSTileOptions(format = "image/png",
-#                                        # transparent = TRUE),
-#               # group = "watersheds") %>%
-#   # addLayersControl(baseGroups = c("Open Street Map", "Satellite Imagery"),
-#                    # overlayGroups = c("NHD", "watersheds")) %>%
-#   # leaflet::hideGroup(c("watersheds"))
-# 
-# return(ll)}
-# 
-# leaflet_dams_map("10500")
+write_csv(fc_dams_cbsa_summary, 'data/flood-control-dams-summary.csv')
+write_csv(fc_dams_cbsa_df, 'data/flood-control-dams-cbsa.csv')

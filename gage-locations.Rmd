@@ -1,0 +1,215 @@
+---
+title: "Metro gauges methods"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_float: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, message = FALSE)
+```
+
+Get the source code for this notebook on Github [here](https://github.com/khondula/river-cities).
+
+```{r, message=FALSE}
+library(tidyverse)
+library(dataRetrieval)
+library(tidycensus)
+library(fs)
+library(glue)
+library(sf)
+library(rosm)
+library(ggrepel)
+library(RStoolbox)
+library(scales)
+library(leaflet)
+library(knitr)
+```
+
+Read in CBSA shapefile and filter to Metro areas (n = 392)
+
+```{r}
+data_dir <- "data"
+cbsa_shp <- glue("{data_dir}/tiger/tl_2019_us_cbsa.shp")
+cbsa_sf <- sf::st_read(cbsa_shp) %>% dplyr::filter(LSAD == "M1")
+```
+
+# Query NWIS for USGS gauges
+
+Define function to find gages within bounding box of a metropolitan area polygon
+
+```{r}
+get_usgs_sites <- function(my_cbsa, savemap = TRUE){
+
+  my_cbsa_sf <- cbsa_sf %>% dplyr::filter(GEOID == my_cbsa)
+  my_bbox <- my_cbsa_sf %>% st_bbox()
+
+  # look for usgs sites with discharge within bbox
+  # use error handling to return null if no sites returned
+  usgs_sites <- tryCatch({
+    dataRetrieval::whatNWISsites(parameterCd = "00060", bBox = my_bbox)},
+    error = function(e) {return(NULL)})
+  # only proceed if there are gauges
+  if(!is.null(usgs_sites)){
+  # get info about sites
+  usgs_sites_info <- readNWISsite(usgs_sites[["site_no"]]) %>%
+    dplyr::select(site_no, state_cd, drain_area_va)
+  # get info about record length
+  site_data <- whatNWISdata(parameterCd = "00060", # discharge
+                                 siteNumber = usgs_sites[["site_no"]]) %>%
+    arrange(begin_date) %>%
+    mutate(early_enough = begin_date < "1950-01-01") %>%
+    mutate(late_enough = end_date > "2019-01-01") %>%
+    mutate(count_10obs = count_nu > 10)
+  
+  site_data_goodrecords <- site_data %>% 
+    dplyr::filter(early_enough, late_enough, count_10obs)
+  
+  if(nrow(site_data_goodrecords) > 0){
+    
+  good_sites_sf <- site_data_goodrecords %>% 
+    dplyr::select(site_no, dec_lat_va, dec_long_va) %>% 
+    distinct() %>%
+    st_as_sf(coords = c("dec_long_va", "dec_lat_va"), crs = 4326)
+
+  # make a table with site info of interest and add city name and pop
+  df <- site_data_goodrecords %>%
+    dplyr::select(agency_cd, site_no, station_nm, dec_lat_va, dec_long_va,
+                  huc_cd, data_type_cd, parm_cd, stat_cd, begin_date, end_date,
+                  count_nu) %>%
+    mutate(site_no = as.character(site_no)) %>%
+    arrange(site_no) %>%
+    left_join(usgs_sites_info) %>%
+    mutate(cbsa_geoid = my_cbsa_sf$GEOID,
+           cbsa_name = my_cbsa_sf$NAME)
+  
+  gauges_dir <- glue("{data_dir}/gauges-cbsa-M1")
+  if(!fs::dir_exists(gauges_dir)){fs::dir_create(gauges_dir)}
+  if(nrow(df) > 0) {readr::write_csv(df, path = glue("{gauges_dir}/cbsa-{my_cbsa_sf$GEOID}.csv"))}
+  
+  if(savemap){
+    myextent <- sp::bbox(as(my_cbsa_sf, "Spatial"))
+    osm1 <- osm.raster(myextent)
+    my_cbsa_prj <- sf::st_transform(my_cbsa_sf, 3857)
+    good_sites_prj <- sf::st_transform(good_sites_sf, 3857)
+    good_sites_prj$lat <- st_coordinates(good_sites_prj) %>% 
+      as.data.frame() %>% pull(Y)
+    good_sites_prj$lon <- st_coordinates(good_sites_prj) %>% 
+      as.data.frame() %>% pull(X)
+
+    m1 <- ggRGB(osm1, ggObj = TRUE, r = 1, g = 2, b = 3)
+    m2 <- m1 +
+      geom_sf(data = my_cbsa_prj, 
+              color = "purple",
+              fill = "purple", 
+              alpha = 0.05) +
+      geom_sf(data = good_sites_sf) +
+      ggrepel::geom_text_repel(
+        data = good_sites_prj,
+        aes(x = lon, y = lat, label = site_no),
+        nudge_y = 0.1
+      ) +
+      theme_minimal() +
+      ggtitle(glue::glue("{my_cbsa_sf$NAME}")) +
+      xlab(element_blank()) +
+      ylab(element_blank())
+   
+    map_dir <- glue::glue("{data_dir}/maps-gauges-M1/")
+    if(!fs::dir_exists(map_dir)){fs::dir_create(map_dir)}
+      mapfile <- glue::glue("{map_dir}/gauges-M1-1950_{my_cbsa_sf$NAME}.pdf")
+      pdf(mapfile, height = 10, width = 8)
+      print(m2)
+      dev.off()
+  }
+    }
+  }
+}
+
+```
+
+Use function for all 392 metropolitan areas
+```{r, cache=TRUE, message=FALSE}
+purrr::walk(cbsa_sf[["GEOID"]], ~get_usgs_sites(.x, savemap = FALSE))
+```
+
+Then read in table for each city and save as one table
+
+```{r}
+gauges_dir <- glue("{data_dir}/gauges-cbsa-M1")
+df <- fs::dir_ls(gauges_dir) %>% 
+  purrr::map_df(~read_csv(.x, col_types = c("cccddccccDDdcdcc")))
+
+df %>% readr::write_csv(glue("{data_dir}/gauges-cbsa-M1.csv"))
+```
+
+View first few rows of data: 
+
+```{r, echo = FALSE, results = 'as.is'}
+knitr::kable(head(df[,c(1:3,10:16)]))
+```
+
+# Function to map gauges
+
+Define function to see gauge locations on interactive map
+
+```{r}
+leaflet_gauges_map <- function(my_cbsa_geoid){
+  gauges_df <- readr::read_csv(glue("{data_dir}/gauges-cbsa-M1.csv"),
+                               col_types = "cccddccccDDdcdcc")
+  gauges_geoids <- gauges_df[["cbsa_geoid"]] %>% unique()
+  if(!my_cbsa_geoid %in% gauges_geoids){stop("No good gauges")}
+  
+  good_sites_sf <- gauges_df %>%
+    dplyr::filter(cbsa_geoid == my_cbsa_geoid) %>%
+    dplyr::select(site_no, station_nm, dec_lat_va, dec_long_va, 
+                  begin_date, end_date, count_nu, drain_area_va) %>%
+    st_as_sf(coords = c("dec_long_va", "dec_lat_va"), crs = 4269)
+  
+  # metro areas
+  cbsa_shp <- glue("{data_dir}/tiger/tl_2019_us_cbsa.shp")
+  cbsa_sf <- sf::st_read(cbsa_shp) %>% dplyr::filter(LSAD == "M1")
+  my_cbsa_sf <- cbsa_sf %>% dplyr::filter(GEOID == my_cbsa_geoid)
+  my_bbox <- my_cbsa_sf %>% st_bbox()
+  
+  nhd <- "https://hydro.nationalmap.gov/arcgis/services/nhd/MapServer/WMSServer"
+  wbd <- "https://hydro.nationalmap.gov/arcgis/services/wbd/MapServer/WMSServer"
+  
+  ll <- leaflet() %>%
+    addProviderTiles(providers$Esri.WorldImagery, 
+                     group = "Satellite Imagery") %>%
+    addTiles(group = "Open Street Map") %>%
+    addPolygons(data = my_cbsa_sf, popup = ~NAMELSAD,
+                fillOpacity = 0) %>%
+    addMarkers(data = good_sites_sf, 
+               popup = ~glue("{site_no}<br>{station_nm}<br> 
+               {begin_date} to {end_date}<br>n={count_nu}<br>
+                            {drain_area_va} sq mi")) %>%
+    addWMSTiles(nhd, 
+                layers = list("5", "6", "9", "10"),
+                options = WMSTileOptions(format = "image/png",
+                                         transparent = TRUE),
+                group = "NHD") %>%
+    addWMSTiles(wbd, layers = list("7"),
+                options = WMSTileOptions(format = "image/png",
+                                         transparent = TRUE),
+                group = "watersheds") %>%
+    addLayersControl(baseGroups = c("Open Street Map", "Satellite Imagery"),
+      overlayGroups = c("NHD", "watersheds")) %>%
+    leaflet::hideGroup(c("watersheds"))
+  
+  return(ll)
+}
+
+```
+
+To view gauges for a given city based on its [GEOID](https://github.com/khondula/river-cities/blob/master/data/reference-tables/cbsa-geoids.csv). Click a marker to see info about the site and discharge record. 
+
+```{r, warning=FALSE}
+leaflet_gauges_map("10500")
+```
+
+
