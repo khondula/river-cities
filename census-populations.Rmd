@@ -1,0 +1,131 @@
+---
+title: "Metro gauges methods"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_float: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, message = FALSE)
+```
+
+Get the source code for this notebook on Github [here](https://github.com/khondula/river-cities).
+
+```{r, message=FALSE}
+library(tidyverse)
+library(dataRetrieval)
+library(tidycensus)
+library(fs)
+library(glue)
+library(sf)
+library(rosm)
+library(ggrepel)
+library(RStoolbox)
+library(scales)
+library(leaflet)
+library(knitr)
+```
+
+# Datasets 
+
+Create and define a folder for data 
+
+```{r}
+data_dir <- "data"
+if(!dir.exists(data_dir)){fs::dir_create(data_dir)}
+```
+
+## Download spatial data
+
+Shapefiles with 2019 boundaries of core-based statistical areas (n = 392) from census FTP website
+
+```{r, cache=TRUE}
+# Core Based Statistical Areas
+cbsa_dir <- glue("{data_dir}/tiger")
+if(!dir.exists(cbsa_dir)){fs::dir_create(cbsa_dir)}
+cbsa_shp <- glue("{cbsa_dir}/tl_2019_us_cbsa.shp")
+if(!file.exists(cbsa_shp)){
+  cbsa2019_url <- 'https://www2.census.gov/geo/tiger/TIGER2019/CBSA/tl_2019_us_cbsa.zip' 
+  tmp <- tempfile()
+  download.file(cbsa2019_url, destfile = tmp)
+  unzip(zipfile = tmp, exdir = data_dir)
+}
+```
+
+
+## Download population data
+
+Metropolitan area populations from 2010-2018
+
+```{r}
+cbsa_file <- "https://www2.census.gov/programs-surveys/popest/datasets/2010-2018/metro/totals/cbsa-est2018-alldata.csv"
+cbsa_dir <- glue("{data_dir}/popest")
+if(!dir.exists(cbsa_dir)){fs::dir_create(cbsa_dir)}
+cbsa_file_local <- glue::glue("{data_dir}/{basename(cbsa_file)}")
+download.file(cbsa_file, destfile = cbsa_file_local)
+```
+
+Read in and reshape 
+
+```{r}
+cbsa_cols <- cols(CBSA = "c", MDIV = "c", STCOU = "c")
+cbsa_df <- read_csv(cbsa_file_local, col_types = cbsa_cols) %>% 
+  dplyr::select(1:16) 
+
+cbsa_long <- cbsa_df %>% 
+  group_by(CBSA, MDIV, STCOU, NAME, LSAD) %>%
+  # convert columns to rows
+  tidyr::pivot_longer(cols = CENSUS2010POP:POPESTIMATE2018, 
+                      names_to = "estimate", values_to = "population") %>%
+  # separate year and estimate type into separate columns 
+  mutate(year = stringr::str_extract(estimate, "\\d+")) %>%
+  mutate(year = as.numeric(year)) %>%
+  mutate(estimate_type = stringr::str_extract(estimate, "[A-Z]+")) %>%
+  dplyr::select(-estimate)
+
+cbsa_long %>% write_csv(glue("{data_dir}/cbsa_population_long.csv"))
+
+```
+
+# Demographic characteristics from American Community Survey
+
+Configure settings for `tidycensus` package.
+
+```{r}
+my_key <- scan("my-census-api-key", "")
+census_api_key(my_key)
+acs_vars_df <- load_variables(dataset = "acs5", year = "2018")
+cbsa_geograhpy <- "metropolitan statistical area/micropolitan statistical area"
+```
+
+Example of browsing ACS to find variable codes using string matching
+
+```{r}
+my_vars <- acs_vars_df %>%
+  dplyr::filter(stringr::str_detect(label, "Built")) %>% # string matching for "Built"
+  dplyr::select(name, label, concept)
+
+unique(my_vars$concept)
+```
+
+## Query ACS data for a set of variables 
+
+```{r}
+my_data <- get_acs(geography = cbsa_geograhpy,
+                   variables = my_vars[["name"]],
+                   year = 2018, # default
+                   survey = "acs5" # default
+                   )
+```
+
+Join with variable names
+
+```{r}
+my_data %>% 
+  left_join(acs_vars_df, by = c("variable" = "name"))
+```
+
